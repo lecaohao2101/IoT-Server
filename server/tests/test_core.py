@@ -413,3 +413,17 @@ def test_env_example_is_a_usable_starting_point():
     settings = Settings(_env_file=example)
     assert settings.app_env == "dev"
     assert settings.cors_origins == ["*"]
+
+
+def test_missing_credentials_file_points_at_the_container_fix(tmp_path, monkeypatch):
+    """This exact misconfiguration took the deployment down: a path that exists
+    on a laptop but is excluded from the image. The message has to name the way
+    out, not just the missing file."""
+    from app.ai.registry import apply_google_credentials
+    from app.core.errors import ConfigError
+
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    with pytest.raises(ConfigError, match="GOOGLE_CREDENTIALS_JSON"):
+        apply_google_credentials(
+            Settings(_env_file=None, google_application_credentials=tmp_path / "absent.json")
+        )

@@ -54,8 +54,14 @@ def apply_google_credentials(settings: Settings) -> None:
 
     resolved = settings.resolve(configured)
     if not resolved.is_file():
+        # The usual cause in a container: credentials/ is excluded from the
+        # image, so a path that works on a laptop points at nothing once
+        # deployed. Say so, rather than leaving a bare "file not found".
         raise ConfigError(
-            f"GOOGLE_APPLICATION_CREDENTIALS points at a missing file: {resolved}"
+            f"GOOGLE_APPLICATION_CREDENTIALS points at a missing file: {resolved}. "
+            "In a container the credentials directory is usually not part of the "
+            "image -- set GOOGLE_CREDENTIALS_JSON to the contents of the "
+            "service-account document instead of a path."
         )
     os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(resolved))
     log.info("google credentials configured", extra={"path": str(resolved)})
