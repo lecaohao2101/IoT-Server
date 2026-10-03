@@ -140,8 +140,12 @@ npm run bundle      # bundle Android, bắt lỗi import mà tsc không thấy
 Kiểm thử hợp đồng với server đang chạy:
 
 ```bash
-npm run e2e -- ws://127.0.0.1:8000
+npm run e2e -- ws://127.0.0.1:8000                      # server không bật API_KEY
+npm run e2e -- wss://smart-apartment-server.fly.dev mp3 <token>
 ```
+
+Tham số thứ ba là codec mong muốn, thứ tư là token (hoặc đặt biến `SERVER_TOKEN`).
+Khi server bật `API_KEY`, WebSocket cũng cần token — y như app.
 
 Script này kết nối thật và kiểm đúng những giả định mà app dựa vào: thứ tự khung,
 codec khai báo trong `tts.start`, mỗi khung MP3 là file hoàn chỉnh, và

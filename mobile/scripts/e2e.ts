@@ -15,6 +15,8 @@ import { concatBytes, pcmToWav } from '../src/pcm.ts';
 const url = process.argv[2] ?? 'ws://127.0.0.1:8011';
 /** Codec app yêu cầu. Server có thể trả về pcm16 nếu provider không mã hoá được. */
 const wanted = (process.argv[3] ?? 'mp3') as 'mp3' | 'pcm16';
+/** Server bật API_KEY thì WebSocket cũng cần token, như app vậy. */
+const token = process.argv[4] ?? process.env.SERVER_TOKEN ?? '';
 const TIMEOUT_MS = 30000;
 
 type Frame = Record<string, any>;
@@ -32,7 +34,8 @@ async function main(): Promise<number> {
   const audio: Uint8Array[] = [];
   const ttsStart: { frame: Frame | null } = { frame: null };
 
-  const socket = new WebSocket(`${url}/ws/voice`);
+  const query = token ? `?token=${encodeURIComponent(token)}` : '';
+  const socket = new WebSocket(`${url}/ws/voice${query}`);
   socket.binaryType = 'arraybuffer';
 
   const done = new Promise<void>((resolve, reject) => {
@@ -72,7 +75,12 @@ async function main(): Promise<number> {
 
     socket.onerror = () => {
       clearTimeout(timer);
-      reject(new Error(`không kết nối được tới ${url}`));
+      reject(
+        new Error(
+          `không kết nối được tới ${url}` +
+            (token ? '' : ' (server có thể đang yêu cầu token — truyền thêm tham số thứ 4 hoặc đặt SERVER_TOKEN)')
+        )
+      );
     };
   });
 

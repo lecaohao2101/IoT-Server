@@ -225,9 +225,9 @@ Tất cả dưới `/api/v1`. Xác thực: `Authorization: Bearer <API_KEY>` ho�
 
 | Method | Path | Mô tả |
 |---|---|---|
-| `GET` | `/healthz` | Liveness, không chạm phụ thuộc nào |
-| `GET` | `/readyz` | Readiness: Redis + MQTT; trả 503 nếu hỏng |
-| `GET` | `/api/v1/system/info` | Thông tin server, provider, policy |
+| `GET` | `/healthz` | Liveness, không chạm phụ thuộc nào. Không bao giờ cần xác thực |
+| `GET` | `/readyz` | Readiness: 503 nếu hỏng. Ẩn danh chỉ thấy `status`/`version`/`build`; có credential mới thấy chi tiết hạ tầng |
+| `GET` | `/api/v1/system/info` | Thông tin server, provider, policy. **Cần xác thực** |
 | `GET` | `/api/v1/rooms` | Danh sách phòng |
 | `GET` | `/api/v1/devices?room=` | Thiết bị kèm trạng thái và miền giá trị |
 | `GET` | `/api/v1/devices/{id}` | Một thiết bị |
@@ -494,7 +494,10 @@ Thêm vào GitHub → **Settings → Secrets and variables → Actions**:
 | Secret | Bắt buộc | Dùng để |
 |---|---|---|
 | `FLY_API_TOKEN` | ✅ | deploy |
-| `SERVER_API_KEY` | không | bước kiểm tra sau deploy đọc được `/api/v1/system/info` khi endpoint đã khoá |
+
+Bước kiểm tra sau deploy không cần secret nào: `/readyz` công bố mã build cho cả
+caller ẩn danh. Một kiểm tra chỉ chạy khi có credential là một kiểm tra sẽ âm
+thầm ngừng chạy.
 
 ### Những quyết định trong workflow
 
@@ -541,7 +544,7 @@ giao thức WebSocket thật — chỉ thay store bằng bộ nhớ và MQTT b�
 có gì mock phần đang được test; chỉ bỏ phần mạng.
 
 ```
-145 passed
+151 passed
 ```
 
 Trọng tâm test: bộ validator (giá trị sai, kẹp giá trị, giờ yên tĩnh, xác nhận,

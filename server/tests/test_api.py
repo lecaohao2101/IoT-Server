@@ -227,3 +227,50 @@ def test_websocket_without_a_token_is_closed(secured_client: TestClient):
 
     with pytest.raises(WebSocketDisconnect), secured_client.websocket_connect("/ws/voice") as ws:
         ws.receive_json()
+
+
+# ------------------------------------------------- information disclosure
+
+
+def test_readyz_hides_infrastructure_from_strangers(secured_client: TestClient):
+    """A public health check should not describe the store, the broker, the AI
+    providers in use, or how many devices the apartment has."""
+    anonymous = secured_client.get("/readyz")
+    assert anonymous.status_code == 200
+    body = anonymous.json()
+    assert set(body) == {"status", "version", "build"}
+    assert body["status"] == "ok"
+    assert "store" not in body and "providers" not in body
+
+    operator = secured_client.get("/readyz", headers={"x-api-key": "s3cret"})
+    assert operator.status_code == 200
+    assert "store" in operator.json()
+    assert "providers" in operator.json()
+
+
+def test_readyz_stays_open_when_auth_is_disabled(client: TestClient):
+    """Dev and deliberately-open deployments keep the full probe."""
+    assert "store" in client.get("/readyz").json()
+
+
+def test_system_info_requires_a_credential(secured_client: TestClient):
+    assert secured_client.get("/api/v1/system/info").status_code == 401
+    assert (
+        secured_client.get(
+            "/api/v1/system/info", headers={"x-api-key": "s3cret"}
+        ).status_code
+        == 200
+    )
+
+
+def test_healthz_never_requires_a_credential(secured_client: TestClient):
+    """Fly's health check is unauthenticated; locking this would fail deploys."""
+    assert secured_client.get("/healthz").json() == {"status": "ok"}
+
+
+def test_build_is_reported_without_a_credential(settings: Settings):
+    """CI confirms which commit is live; making that need a secret means it
+    silently degrades to a warning and stops catching stale deployments."""
+    stamped = Settings(**{**settings.model_dump(), "api_key": "s3cret", "build_sha": "abc1234"})
+    with TestClient(create_app(stamped)) as client:
+        assert client.get("/readyz").json()["build"] == "abc1234"

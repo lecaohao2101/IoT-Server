@@ -153,8 +153,6 @@ jobs:
 
       - name: Kiểm tra bản vừa deploy
         if: steps.changes.outputs.changed == 'true'
-        env:
-          API_KEY: ${{ secrets.SERVER_API_KEY }}
         run: |
           set -euo pipefail
           base=https://smart-apartment-server.fly.dev
@@ -166,14 +164,14 @@ jobs:
           echo "$status" | grep -q '"ok"'
 
           # Xác nhận bản đang chạy đúng là commit vừa push, không phải bản cũ
-          # còn sót do deploy lỗi âm thầm.
-          info=$(curl -fsS -m 15 ${API_KEY:+-H "Authorization: Bearer $API_KEY"} \
-                 "$base/api/v1/system/info" || echo '{}')
-          running=$(echo "$info" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("build") or "")' 2>/dev/null || echo "")
+          # còn sót do deploy lỗi âm thầm. /readyz công bố mã build cho cả
+          # caller ẩn danh, nên bước này không cần secret nào -- một kiểm tra
+          # chỉ chạy khi có credential là một kiểm tra sẽ âm thầm ngừng chạy.
+          ready=$(curl -fsS -m 15 "$base/readyz" || echo '{}')
+          running=$(echo "$ready" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("build") or "")' 2>/dev/null || echo "")
 
           if [ -z "$running" ]; then
-            echo "::warning::Không đọc được build đang chạy (endpoint có thể đã yêu cầu xác thực)."
-            echo "::warning::Thêm secret SERVER_API_KEY để bước này kiểm được đầy đủ."
+            echo "::warning::Server không báo mã build — nhiều khả năng đang chạy bản cũ hơn bản vá này."
           elif [ "$running" != "$expected" ]; then
             echo "::error::Bản đang chạy là '$running', đáng lẽ phải là '$expected'"
             exit 1

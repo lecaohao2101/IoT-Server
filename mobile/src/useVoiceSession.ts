@@ -40,7 +40,8 @@ import { voiceSocketUrl, type Settings } from './settings';
 
 const MIC_ENCODING = 'int16' as const;
 const PING_INTERVAL_MS = 20000;
-const RECONNECT_DELAY_MS = 2500;
+const RECONNECT_DELAY_MS = 2000;
+const RECONNECT_MAX_DELAY_MS = 30000;
 
 export type ConnectionState = 'offline' | 'connecting' | 'ready' | 'error';
 
@@ -71,6 +72,7 @@ export function useVoiceSession(settings: Settings | null) {
   const socketRef = useRef<WebSocket | null>(null);
   const wantConnectedRef = useRef(false);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attemptRef = useRef(0);
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingRef = useRef(false);
   const replyExtRef = useRef('mp3');
@@ -143,6 +145,7 @@ export function useVoiceSession(settings: Settings | null) {
         case 'session.ready':
           setState('ready');
           setError(null);
+          attemptRef.current = 0; // kết nối tốt: bắt đầu lại backoff từ đầu
           break;
 
         case 'stt.partial':
@@ -214,6 +217,7 @@ export function useVoiceSession(settings: Settings | null) {
 
   const disconnect = useCallback(() => {
     wantConnectedRef.current = false;
+    attemptRef.current = 0;
     if (reconnectRef.current) clearTimeout(reconnectRef.current);
     if (pingRef.current) clearInterval(pingRef.current);
     reconnectRef.current = null;
@@ -244,6 +248,10 @@ export function useVoiceSession(settings: Settings | null) {
     socketRef.current = socket;
 
     socket.onopen = () => {
+      if (!isCurrent()) {
+        socket.close();
+        return;
+      }
       send({
         type: 'hello',
         room: current.room || null,
@@ -256,7 +264,13 @@ export function useVoiceSession(settings: Settings | null) {
       pingRef.current = setInterval(() => send({ type: 'ping' }), PING_INTERVAL_MS);
     };
 
+    // Every handler checks it is still the current socket. A socket closing
+    // late would otherwise clear the reference to its replacement, clear the
+    // new ping timer, and report offline while the new connection is alive.
+    const isCurrent = () => socketRef.current === socket;
+
     socket.onmessage = (event) => {
+      if (!isCurrent()) return;
       if (typeof event.data === 'string') {
         handleFrame(event.data);
       } else if (event.data instanceof ArrayBuffer) {
@@ -271,11 +285,13 @@ export function useVoiceSession(settings: Settings | null) {
     };
 
     socket.onerror = () => {
+      if (!isCurrent()) return;
       setState('error');
-      setError('Mất kết nối tới server. Kiểm tra địa chỉ và cùng mạng Wi-Fi.');
+      setError('Không kết nối được tới server. Kiểm tra địa chỉ trong Cài đặt.');
     };
 
     socket.onclose = () => {
+      if (!isCurrent()) return;
       if (pingRef.current) clearInterval(pingRef.current);
       pingRef.current = null;
       socketRef.current = null;
@@ -284,7 +300,14 @@ export function useVoiceSession(settings: Settings | null) {
       setState((previous) => (previous === 'error' ? 'error' : 'offline'));
 
       if (wantConnectedRef.current) {
-        reconnectRef.current = setTimeout(() => connect(), RECONNECT_DELAY_MS);
+        // Back off: an unreachable server should not be retried every 2.5 s
+        // for as long as the app is open -- that is a flat battery by lunch.
+        const wait = Math.min(
+          RECONNECT_MAX_DELAY_MS,
+          RECONNECT_DELAY_MS * 2 ** attemptRef.current
+        );
+        attemptRef.current += 1;
+        reconnectRef.current = setTimeout(() => connect(), wait);
       }
     };
   }, [handleFrame, send, speech]);

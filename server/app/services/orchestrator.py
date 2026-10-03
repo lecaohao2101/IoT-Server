@@ -129,6 +129,10 @@ class _SpeechWorker:
         self.failed: str | None = None
         self._t0 = time.monotonic()
 
+    @property
+    def done(self) -> bool:
+        return self._task.done()
+
     def submit(self, clause: str) -> None:
         if clause.strip():
             self._queue.put_nowait(clause.strip())
@@ -273,6 +277,39 @@ class Orchestrator:
             else None
         )
 
+        try:
+            return await self._complete_turn(
+                session_id=session_id,
+                user_text=user_text,
+                system=system,
+                messages=messages,
+                snapshot=snapshot,
+                now=now,
+                sink=sink,
+                worker=worker,
+                latency=latency,
+                started=started,
+            )
+        finally:
+            # Cancelling a turn (barge-in, client disconnect) must not leave the
+            # synthesis task blocked on its queue for the life of the process.
+            if worker is not None and not worker.done:
+                await worker.abort()
+
+    async def _complete_turn(
+        self,
+        *,
+        session_id: str,
+        user_text: str,
+        system: str,
+        messages: list[LlmMessage],
+        snapshot,
+        now,
+        sink: TurnSink,
+        worker: _SpeechWorker | None,
+        latency: dict[str, float],
+        started: float,
+    ) -> TurnResult:
         raw, speech, first_token_ms, stream_error = await self._stream_reply(
             system=system, messages=messages, sink=sink, worker=worker
         )
@@ -536,8 +573,12 @@ class Orchestrator:
         if not speak:
             return
         worker = _SpeechWorker(self._tts, sink, encoding, sample_rate, self._tts_chunk_bytes)
-        worker.submit(text)
-        await worker.finish()
+        try:
+            worker.submit(text)
+            await worker.finish()
+        finally:
+            if not worker.done:
+                await worker.abort()
 
     # -------------------------------------------------------------- helpers
     def _device_name(self, device_id: str) -> str:

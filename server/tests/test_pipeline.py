@@ -8,6 +8,7 @@ that must wait for a human.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -464,3 +465,45 @@ async def test_offline_reasoner_unlocks_and_locks_the_door(container):
 
     lock = await container.orchestrator.run_turn(session_id="s18", user_text="khóa cửa lại")
     assert lock.plan.pending_confirmation[0].value is True
+
+
+async def test_cancelling_a_turn_does_not_leak_the_synthesis_task(container):
+    """Barge-in cancels the turn mid-reply.
+
+    The TTS worker runs as its own task waiting on a queue; if the turn is
+    cancelled before `finish()` puts the sentinel in, that task waits forever.
+    One leaked task per interruption, for the life of the process.
+    """
+
+    class SlowLlm(LanguageModel):
+        name = "slow"
+
+        async def stream(self, *, system, messages, json_schema=None):
+            yield '{"speech": "Đang nói một câu dài. '
+            await asyncio.sleep(10)  # user cuts in here
+            yield 'phần còn lại", "commands": []}'
+
+    orchestrator = orchestrator_with(container, SlowLlm())
+    task = asyncio.create_task(
+        orchestrator.run_turn(session_id="barge", user_text="xin chào", sink=RecordingSink())
+    )
+    await asyncio.sleep(0.2)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.1)
+
+    lingering = [t for t in asyncio.all_tasks() if t.get_name() == "tts-worker" and not t.done()]
+    assert lingering == [], f"{len(lingering)} tts-worker còn treo"
+
+
+async def test_a_normal_turn_leaves_no_background_tasks(container):
+    before = {t for t in asyncio.all_tasks() if not t.done()}
+    await container.orchestrator.run_turn(session_id="clean", user_text="bật đèn bếp")
+    await asyncio.sleep(0.1)
+    leaked = {
+        t
+        for t in asyncio.all_tasks()
+        if not t.done() and t not in before and t.get_name() in {"tts-worker", "turn"}
+    }
+    assert leaked == set()

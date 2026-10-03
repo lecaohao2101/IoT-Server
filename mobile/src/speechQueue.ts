@@ -27,6 +27,10 @@ export class SpeechQueue {
   private draining = false;
   private stopped = false;
   private counter = 0;
+  /** Settles the clause currently playing. `stop()` needs it: without a way to
+   *  resolve that promise, `drain()` stays awaiting a player it already tore
+   *  down, and the next reply waits out the playback timeout before it is heard. */
+  private finishCurrent: (() => void) | null = null;
 
   constructor(private readonly onSpeakingChange: (speaking: boolean) => void) {}
 
@@ -54,9 +58,14 @@ export class SpeechQueue {
   /** Stop immediately and drop anything pending -- used for barge-in. */
   stop(): void {
     this.stopped = true;
-    this.releasePlayer();
     for (const item of this.queue) this.safeDelete(item.file);
     this.queue = [];
+    // Settle the in-flight clause before releasing the player, so `drain()`
+    // leaves its await instead of hanging until the playback timeout.
+    const finish = this.finishCurrent;
+    this.finishCurrent = null;
+    if (finish) finish();
+    this.releasePlayer();
     this.onSpeakingChange(false);
   }
 
@@ -88,10 +97,12 @@ export class SpeechQueue {
         settled = true;
         clearTimeout(timer);
         subscription?.remove();
+        if (this.finishCurrent === finish) this.finishCurrent = null;
         this.releasePlayer();
         this.safeDelete(file);
         resolve();
       };
+      this.finishCurrent = finish;
 
       const timer = setTimeout(finish, PLAYBACK_TIMEOUT_MS);
       let subscription: { remove: () => void } | undefined;
