@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Provider = Literal["google", "mock"]
 
@@ -34,11 +34,13 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
     log_json: bool = True
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"])
+    #: NoDecode: để _split_csv tự phân tích. Nếu không, pydantic-settings sẽ
+    #: json.loads giá trị trước và `CORS_ORIGINS=*` làm server chết lúc khởi động.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["*"])
 
     # ----------------------------------------------------------- security
     api_key: SecretStr | None = None
-    device_tokens: dict[str, str] = Field(default_factory=dict)
+    device_tokens: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict)
     #: Explicit opt-in to running without authentication outside `dev`. Exists so
     #: an open demo deployment is something somebody chose, never something that
     #: happened because a secret was not set.
@@ -84,7 +86,7 @@ class Settings(BaseSettings):
     google_credentials_json: SecretStr | None = None
 
     stt_language: str = "vi-VN"
-    stt_alt_languages: list[str] = Field(default_factory=list)
+    stt_alt_languages: Annotated[list[str], NoDecode] = Field(default_factory=list)
     stt_model: str = "long"
 
     tts_voice: str = "vi-VN-Neural2-A"

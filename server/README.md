@@ -469,7 +469,65 @@ phải sticky theo phiên.
 
 ---
 
-## 11. Phát triển
+## 11. CI/CD
+
+[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) chạy mỗi lần push lên
+`main` và mỗi pull request.
+
+```
+push/PR ──► server: ruff + pytest + kiểm tra .env.example
+        ──► mobile: typecheck + verify + bundle Android
+                        │
+                 cả hai xanh
+                        │
+            push lên main ──► deploy Fly.io ──► kiểm tra bản vừa deploy
+```
+
+### Chuẩn bị một lần
+
+```bash
+fly tokens create deploy -x 8760h
+```
+
+Thêm vào GitHub → **Settings → Secrets and variables → Actions**:
+
+| Secret | Bắt buộc | Dùng để |
+|---|---|---|
+| `FLY_API_TOKEN` | ✅ | deploy |
+| `SERVER_API_KEY` | không | bước kiểm tra sau deploy đọc được `/api/v1/system/info` khi endpoint đã khoá |
+
+### Những quyết định trong workflow
+
+**Chỉ deploy khi `server/` thay đổi.** Một lần deploy thừa vẫn khởi động lại máy,
+và với state nằm trong bộ nhớ thì toàn bộ trạng thái thiết bị cùng lịch sử hội
+thoại bay sạch. Sửa app mobile không có lý do gì làm căn hộ quên mất đèn đang bật.
+Cần deploy lại bằng tay thì chạy workflow thủ công với `force_deploy`.
+
+**Kiểm tra sau khi deploy, không chỉ sau khi build.** Bước cuối gọi `/healthz` rồi
+đối chiếu trường `build` trong `/api/v1/system/info` với commit vừa push. Deploy
+"thành công" nhưng máy vẫn chạy bản cũ là chuyện có thật — và không có mã build
+thì không ai phát hiện ra.
+
+**Kiểm tra `.env.example`.** Đó là file người mới clone về sẽ copy nguyên xi.
+Bước này từng bắt được một lỗi thật: `CORS_ORIGINS=*` làm server chết ngay lúc
+khởi động, vì pydantic-settings `json.loads` trường kiểu list trước khi validator
+kịp chạy.
+
+**PR không bao giờ deploy.** Workflow chỉ deploy khi sự kiện là `push` lên `main`.
+
+### Lần deploy đầu sẽ hỏng nếu chưa đặt secret
+
+Sau bản vá chặn triển khai mở, server **từ chối khởi động** khi `APP_ENV` khác
+`dev` mà không có `API_KEY`. Health check của Fly sẽ fail và deploy bị coi là
+thất bại. Đặt secret trước:
+
+```bash
+fly secrets set API_KEY=$(openssl rand -hex 24)
+```
+
+---
+
+## 12. Phát triển
 
 ```bash
 make test       # hoặc: .venv/Scripts/python.exe -m pytest -q
@@ -483,7 +541,7 @@ giao thức WebSocket thật — chỉ thay store bằng bộ nhớ và MQTT b�
 có gì mock phần đang được test; chỉ bỏ phần mạng.
 
 ```
-138 passed
+145 passed
 ```
 
 Trọng tâm test: bộ validator (giá trị sai, kẹp giá trị, giờ yên tĩnh, xác nhận,
@@ -512,7 +570,7 @@ tests/               124 test
 
 ---
 
-## 12. Ghi chú cho firmware ESP32
+## 13. Ghi chú cho firmware ESP32
 
 1. **Định dạng âm thanh**: I2S → PCM 16-bit, 16 kHz, mono. Gửi thẳng khung nhị
    phân, không bọc WAV. Khung 20 ms (640 byte) là kích thước hợp lý.

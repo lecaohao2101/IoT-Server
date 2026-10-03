@@ -374,3 +374,42 @@ def test_malformed_inline_credentials_fail_at_startup(monkeypatch):
         apply_google_credentials(Settings(_env_file=None, google_credentials_json="not json"))
     with pytest.raises(ConfigError, match="service-account"):
         apply_google_credentials(Settings(_env_file=None, google_credentials_json='{"a": 1}'))
+
+
+# --------------------------------------------- list settings from env
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("*", ["*"]),
+        ("https://a.example", ["https://a.example"]),
+        ("https://a.example, https://b.example", ["https://a.example", "https://b.example"]),
+        ('["https://a.example"]', ["https://a.example"]),
+        ("", []),
+    ],
+)
+def test_cors_origins_accepts_plain_env_strings(monkeypatch, raw, expected):
+    """`CORS_ORIGINS=*` must not crash the server at startup.
+
+    pydantic-settings treats a list field as complex and JSON-decodes it before
+    any validator runs, so an unquoted `*` raised a parse error and the process
+    died before serving a single request. NoDecode hands parsing to us instead.
+    """
+    monkeypatch.setenv("CORS_ORIGINS", raw)
+    assert Settings(_env_file=None).cors_origins == expected
+
+
+def test_device_tokens_still_require_json(monkeypatch):
+    monkeypatch.setenv("DEVICE_TOKENS", '{"esp32": "secret"}')
+    assert Settings(_env_file=None).device_tokens == {"esp32": "secret"}
+
+
+def test_env_example_is_a_usable_starting_point():
+    """A newcomer copies this file verbatim; it has to load."""
+    from pathlib import Path
+
+    example = Path(__file__).resolve().parent.parent / ".env.example"
+    settings = Settings(_env_file=example)
+    assert settings.app_env == "dev"
+    assert settings.cors_origins == ["*"]
