@@ -10,6 +10,7 @@ refusing to boot.
 from __future__ import annotations
 
 import logging
+import os
 
 from app.ai.base import LanguageModel, SpeechRecognizer, SpeechSynthesizer
 from app.ai.llm.mock import MockLanguageModel
@@ -20,6 +21,34 @@ from app.core.errors import ConfigError
 from app.domain.home import HomeConfig
 
 log = logging.getLogger(__name__)
+
+
+def apply_google_credentials(settings: Settings) -> None:
+    """Export the service-account path into the process environment.
+
+    Google's client libraries resolve credentials from ``GOOGLE_APPLICATION_CREDENTIALS``
+    in ``os.environ``; they never see our ``Settings`` object. Without this, a path
+    configured in ``.env`` is silently ignored and every call fails with a confusing
+    "credentials missing" error. Must run before any client is constructed.
+
+    A value already present in the real environment wins -- an operator overriding
+    the deployment should not be undone by a stale ``.env``.
+    """
+    project = settings.google_project_id
+    if project:
+        os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project)
+
+    configured = settings.google_application_credentials
+    if configured is None:
+        return
+
+    resolved = settings.resolve(configured)
+    if not resolved.is_file():
+        raise ConfigError(
+            f"GOOGLE_APPLICATION_CREDENTIALS points at a missing file: {resolved}"
+        )
+    os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(resolved))
+    log.info("google credentials configured", extra={"path": str(resolved)})
 
 
 def _fail_or_fallback(settings: Settings, stage: str, exc: Exception, fallback):

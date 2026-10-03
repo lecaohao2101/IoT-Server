@@ -132,9 +132,16 @@ class Settings(BaseSettings):
     def _blank_to_none(cls, v: Any) -> Any:
         return None if isinstance(v, str) and not v.strip() else v
 
-    @field_validator("redis_url", "mqtt_username", "google_project_id", mode="before")
+    @field_validator(
+        "redis_url",
+        "mqtt_username",
+        "google_project_id",
+        "google_application_credentials",
+        mode="before",
+    )
     @classmethod
     def _blank_str_to_none(cls, v: Any) -> Any:
+        # An empty line in .env must mean "unset", not Path("") or the empty string.
         return None if isinstance(v, str) and not v.strip() else v
 
     @model_validator(mode="after")

@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.ruff_cache/
+
+# Local configuration & secrets
+.env
+.env.*
+!.env.example
+credentials/
+
+# Testing & Artifacts
+tests/
+*.wav
+*.mp3
+reply.wav
+
+# Docker / Deploy config
+docker-compose*.yml
+deploy/
+fly.toml
+README.md
+Makefile
+pyproject.toml

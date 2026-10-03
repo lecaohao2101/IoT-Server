@@ -206,3 +206,87 @@ def test_settings_reject_insecure_production_posture():
 def test_settings_parse_json_device_tokens():
     settings = Settings(_env_file=None, device_tokens=json.dumps({"a": "b"}))
     assert settings.device_tokens == {"a": "b"}
+
+
+# ------------------------------------------------------- google credentials
+
+
+def test_blank_credentials_path_means_unset():
+    """An empty line in .env must be None, not Path("") -- which resolves to the
+    server directory and makes every Google client fail with a confusing error."""
+    settings = Settings(_env_file=None, google_application_credentials="")
+    assert settings.google_application_credentials is None
+    assert Settings(_env_file=None, google_project_id="  ").google_project_id is None
+
+
+def test_credentials_path_is_exported_to_the_process_environment(tmp_path, monkeypatch):
+    """Google's SDKs read os.environ, never our Settings object."""
+    from app.ai.registry import apply_google_credentials
+
+    key_file = tmp_path / "service-account.json"
+    key_file.write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+
+    settings = Settings(
+        _env_file=None,
+        google_application_credentials=key_file,
+        google_project_id="proj-123",
+    )
+    apply_google_credentials(settings)
+
+    import os
+
+    assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == str(key_file)
+    assert os.environ["GOOGLE_CLOUD_PROJECT"] == "proj-123"
+
+
+def test_missing_credentials_file_fails_loudly(tmp_path, monkeypatch):
+    from app.ai.registry import apply_google_credentials
+    from app.core.errors import ConfigError
+
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    settings = Settings(
+        _env_file=None, google_application_credentials=tmp_path / "nope.json"
+    )
+    with pytest.raises(ConfigError):
+        apply_google_credentials(settings)
+
+
+def test_existing_environment_wins_over_dotenv(tmp_path, monkeypatch):
+    """An operator overriding the deployment must not be undone by a stale .env."""
+    from app.ai.registry import apply_google_credentials
+
+    key_file = tmp_path / "from-dotenv.json"
+    key_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/already/set.json")
+
+    apply_google_credentials(
+        Settings(_env_file=None, google_application_credentials=key_file)
+    )
+
+    import os
+
+    assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == "/already/set.json"
+
+
+def test_staging_without_api_key_is_allowed_but_must_warn(caplog):
+    """`prod` is refused outright; `staging` is permitted (Fly previews use it)
+    but must not slip out silently -- an open server controls a real apartment."""
+    import asyncio
+    import logging
+
+    from app.container import AppContainer
+
+    settings = Settings(
+        _env_file=None, app_env="staging", api_key=None, redis_url=None, mqtt_enabled=False
+    )
+    assert not settings.auth_enabled
+
+    async def build():
+        container = await AppContainer.create(settings)
+        await container.aclose()
+
+    with caplog.at_level(logging.WARNING):
+        asyncio.run(build())
+    assert any("AUTHENTICATION IS DISABLED" in r.message for r in caplog.records)

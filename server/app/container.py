@@ -14,7 +14,12 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.ai.base import LanguageModel, SpeechRecognizer, SpeechSynthesizer
-from app.ai.registry import build_language_model, build_recognizer, build_synthesizer
+from app.ai.registry import (
+    apply_google_credentials,
+    build_language_model,
+    build_recognizer,
+    build_synthesizer,
+)
 from app.config import Settings
 from app.core.eventbus import EventBus
 from app.domain.home import HomeConfig, load_home_config
@@ -65,6 +70,13 @@ class AppContainer:
             },
         )
 
+        if not settings.auth_enabled and settings.app_env != "dev":
+            log.warning(
+                "AUTHENTICATION IS DISABLED -- anyone who can reach this server can "
+                "control the apartment. Set API_KEY before exposing it to a network.",
+                extra={"env": settings.app_env},
+            )
+
         store = await create_store(settings)
         bus = EventBus()
         state = DeviceStateManager(store, home, bus)
@@ -79,6 +91,9 @@ class AppContainer:
         bridge = DeviceBridge(transport, home, state, bus, qos=settings.mqtt_qos)
         await bridge.start()
 
+        # Must precede every provider: the Google SDKs read credentials from
+        # the process environment, not from Settings.
+        apply_google_credentials(settings)
         stt = build_recognizer(settings)
         tts = build_synthesizer(settings)
         llm = build_language_model(settings, home)

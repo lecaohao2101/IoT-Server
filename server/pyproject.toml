@@ -20,6 +20,10 @@ filterwarnings = ["ignore::DeprecationWarning"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint.per-file-ignores]
+# CLI scripts: a blocking file read is fine when nothing else is running.
+"tools/*" = ["ASYNC240"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "C4", "SIM"]
 # B008: FastAPI Depends() in defaults is the framework idiom.

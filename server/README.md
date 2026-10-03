@@ -352,9 +352,26 @@ TTS_VOICE=vi-VN-Neural2-A
   ESP32.
 - **LLM** — Gemini qua `google-genai`, decode có ràng buộc JSON schema.
 
+Kiểm tra credentials bằng một lệnh — công cụ gọi thật từng dịch vụ và dịch lỗi
+của Google sang đúng việc cần làm:
+
+```bash
+.venv/Scripts/python.exe tools/check_providers.py --all
+```
+
+Hai điều dễ vấp:
+
+* **Gemini API key không dùng được cho Cloud STT/TTS.** Đó là hai hệ xác thực khác
+  nhau: Gemini nhận API key, còn Cloud Speech-to-Text và Text-to-Speech chỉ nhận
+  OAuth2 / service account (`GOOGLE_APPLICATION_CREDENTIALS`).
+* Nếu key báo `API_KEY_SERVICE_BLOCKED`, vào Console > Credentials > mở key >
+  *API restrictions* và cho phép *Generative Language API*, hoặc tạo key mới tại
+  <https://aistudio.google.com/apikey>.
+
 Mỗi tầng chọn provider độc lập: có thể chạy STT Google + LLM mock khi đang debug.
 Nếu provider khởi tạo lỗi, ngoài production sẽ tự rơi về mock và ghi log; trong
-production thì **từ chối khởi động**.
+production thì **từ chối khởi động**. Luôn kiểm tra `GET /api/v1/system/info` →
+trường `providers` để biết tầng nào đang chạy thật, thay vì tin vào `.env`.
 
 > Mock không phải đồ trang trí: `MockLanguageModel` là bộ so khớp ý định chạy trên
 > chính catalogue thật, nên toàn bộ đường ống (WS → STT → suy luận → validator →
@@ -399,7 +416,7 @@ giao thức WebSocket thật — chỉ thay store bằng bộ nhớ và MQTT b�
 có gì mock phần đang được test; chỉ bỏ phần mạng.
 
 ```
-124 passed
+130 passed
 ```
 
 Trọng tâm test: bộ validator (giá trị sai, kẹp giá trị, giờ yên tĩnh, xác nhận,
@@ -422,7 +439,7 @@ app/
   ai/                base + prompts + schemas + {stt,tts,llm}/{google,mock}
   api/               deps, schemas, routes_*, ws_protocol, ws_voice
 config/              home.yaml, safety.yaml
-tools/               simulate_client.py, fake_device.py
+tools/               simulate_client.py, fake_device.py, check_providers.py
 tests/               124 test
 ```
 

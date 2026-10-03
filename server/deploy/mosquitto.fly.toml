@@ -1,0 +1,19 @@
+# fly.toml for Mosquitto MQTT Broker
+app = "smart-apartment-mosquitto"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile.mosquitto"
+
+[[services]]
+  protocol = "tcp"
+  internal_schema = "tcp"
+  internal_port = 1883
+
+  [[services.ports]]
+    port = 1883
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
