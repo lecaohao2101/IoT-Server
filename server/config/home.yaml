@@ -399,3 +399,22 @@ scenes:
       - { device_id: bedroom_light, capability: power, value: "on" }
       - { device_id: bedroom_light, capability: brightness, value: "50" }
       - { device_id: bedroom_ac, capability: power, value: "off" }
+
+  - id: reading
+    name: "Chế độ đọc sách"
+    aliases: ["đọc sách", "doc sach", "muốn đọc sách", "xem sách", "đọc truyện", "học bài"]
+    description: "Bật đèn phòng ngủ mức 80% ánh sáng ấm 4000K để đọc sách"
+    actions:
+      - { device_id: bedroom_light, capability: power, value: "on" }
+      - { device_id: bedroom_light, capability: brightness, value: "80" }
+      - { device_id: bedroom_light, capability: color_temp, value: "4000" }
+
+  - id: relax
+    name: "Chế độ thư giãn"
+    aliases: ["thư giãn", "thu gian", "nghỉ ngơi", "xả stress", "muốn nghỉ ngơi"]
+    description: "Bật đèn phòng khách dịu 40% ánh sáng vàng 3000K"
+    actions:
+      - { device_id: living_room_light, capability: power, value: "on" }
+      - { device_id: living_room_light, capability: brightness, value: "40" }
+      - { device_id: living_room_light, capability: color_temp, value: "3000" }
+

@@ -78,21 +78,87 @@ class MockLanguageModel(LanguageModel):
 
     # ----------------------------------------------------------- reasoning
     def _reason(self, text: str, system: str, history: list[str] | None = None) -> dict[str, Any]:
-        norm = strip_accents(text)
+        norm = strip_accents(text).lower().strip()
         current_room = self._current_room(system)
         state = self._parse_state(system)
 
+        # 1. Trả lời thân thiện khi người dùng nói lửng lơ hoặc chào hỏi
+        _VAGUE_PHRASES = (
+            "toi can", "toi muon", "giup toi", "tro ly oi", "alo",
+            "chao ban", "ban oi", "co ai khong", "hi", "hello", "giup voi"
+        )
+        words = [w for w in norm.replace(".", " ").split() if w]
+        if (any(norm.startswith(p) for p in _VAGUE_PHRASES) or norm in {"toi can", "toi can."}) and len(words) <= 4 and not self._has_action(norm):
+            return {
+                "speech": "Mình đây, bạn cần mình hỗ trợ gì ạ? Bật đèn, chỉnh điều hòa hay mở rèm?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": True,
+            }
+
+        # 2. Khớp kịch bản (Scenes)
         scene_id = self._match_scene(norm)
         if scene_id is not None:
             scene = self._home.scene_map[scene_id]
+            speech_map = {
+                "reading": "Mình đã bật chế độ đọc sách với ánh sáng dịu cho bạn rồi nhé.",
+                "good_night": "Chúc bạn ngủ ngon, mình đã chỉnh đèn dịu và đóng rèm rồi nhé.",
+                "leaving_home": "Mình đã tắt toàn bộ thiết bị để bạn an tâm ra ngoài nhé.",
+                "movie_time": "Mình đã chuyển sang chế độ xem phim rồi nhé.",
+                "wake_up": "Chào buổi sáng, mình đã mở rèm đón nắng cho bạn rồi nhé.",
+                "relax": "Mình đã bật chế độ thư giãn cho bạn nghỉ ngơi rồi nhé.",
+            }
+            speech = speech_map.get(scene_id, f"Mình đã kích hoạt {scene.name.lower()} cho bạn rồi nhé.")
             return {
-                "speech": f"Đã bật {scene.name.lower()}.",
+                "speech": speech,
                 "commands": [],
                 "scene": scene_id,
                 "needs_clarification": False,
             }
 
+        # 3. Phản hồi nhu cầu & cảm giác sinh hoạt đời thường (Nóng, Lạnh, Tối, Sáng)
         room = self._match_room(norm) or current_room
+        if any(w in norm for w in ("nong qua", "nuc qua", "troi nong", "nong qua di")):
+            ac = self._find_device_of_type(DeviceType.AIR_CONDITIONER, room)
+            if ac:
+                cmds = self._set_ac_comfort(ac, state, temp=25)
+                return {
+                    "speech": "Trời hơi nóng đúng không? Mình bật điều hòa 25 độ cho mát nhé.",
+                    "commands": cmds,
+                    "scene": None,
+                    "needs_clarification": False,
+                }
+        if any(w in norm for w in ("lanh qua", "ret qua", "troi lanh")):
+            ac = self._find_device_of_type(DeviceType.AIR_CONDITIONER, room)
+            if ac:
+                cmds = self._set_ac_comfort(ac, state, temp=27)
+                return {
+                    "speech": "Hơi lạnh đúng không? Mình tăng điều hòa lên 27 độ cho ấm hơn nhé.",
+                    "commands": cmds,
+                    "scene": None,
+                    "needs_clarification": False,
+                }
+        if any(w in norm for w in ("toi qua", "sao toi the", "phong toi", "toi the")):
+            light = self._find_device_of_type(DeviceType.LIGHT, room)
+            if light:
+                cmds = self._set_light_comfort(light, brightness=100)
+                return {
+                    "speech": "Phòng hơi tối, để mình bật đèn sáng lên cho bạn nhé.",
+                    "commands": cmds,
+                    "scene": None,
+                    "needs_clarification": False,
+                }
+        if any(w in norm for w in ("sang qua", "choi qua", "choi mat")):
+            light = self._find_device_of_type(DeviceType.LIGHT, room)
+            if light:
+                cmds = self._set_light_comfort(light, brightness=30)
+                return {
+                    "speech": "Mình giảm bớt độ sáng đèn cho dịu mắt bạn nhé.",
+                    "commands": cmds,
+                    "scene": None,
+                    "needs_clarification": False,
+                }
+
         targets = self._match_devices(norm, room)
         if not targets:
             # "sáng hơn chút" names nothing: carry the subject over from the
@@ -104,7 +170,7 @@ class MockLanguageModel(LanguageModel):
 
         if not targets:
             return {
-                "speech": "Bạn muốn điều khiển thiết bị nào ạ?",
+                "speech": "Bạn muốn điều khiển thiết bị nào ạ? Bật đèn, điều hòa hay rèm cửa?",
                 "commands": [],
                 "scene": None,
                 "needs_clarification": True,
@@ -115,8 +181,9 @@ class MockLanguageModel(LanguageModel):
             commands.extend(self._commands_for(device, norm, state))
 
         if not commands:
+            device_name = targets[0].name.lower()
             return {
-                "speech": "Mình chưa rõ bạn muốn làm gì với thiết bị này.",
+                "speech": f"Bạn muốn mình bật, tắt hay chỉnh gì cho {device_name} ạ?",
                 "commands": [],
                 "scene": None,
                 "needs_clarification": True,
@@ -128,6 +195,36 @@ class MockLanguageModel(LanguageModel):
             "scene": None,
             "needs_clarification": False,
         }
+
+    def _find_device_of_type(self, device_type: DeviceType, room: str | None) -> Device | None:
+        pool = [d for d in self._home.devices if d.type is device_type]
+        if room:
+            scoped = [d for d in pool if d.room == room]
+            if scoped:
+                return scoped[0]
+        return pool[0] if pool else None
+
+    @staticmethod
+    def _set_ac_comfort(ac: Device, state: dict[str, dict[str, str]], temp: int) -> list[dict[str, Any]]:
+        cmds = []
+        power_cap = MockLanguageModel._power_capability(ac.writable_capabilities)
+        temp_cap = MockLanguageModel._numeric_capability(ac.writable_capabilities, ("temperature", "target_temperature", "setpoint"))
+        if power_cap:
+            cmds.append(MockLanguageModel._cmd(ac, power_cap, MockLanguageModel._power_value(power_cap, on=True)))
+        if temp_cap:
+            cmds.append(MockLanguageModel._cmd(ac, temp_cap, str(temp)))
+        return cmds
+
+    @staticmethod
+    def _set_light_comfort(light: Device, brightness: int) -> list[dict[str, Any]]:
+        cmds = []
+        power_cap = MockLanguageModel._power_capability(light.writable_capabilities)
+        bright_cap = MockLanguageModel._numeric_capability(light.writable_capabilities, ("brightness", "level"))
+        if power_cap:
+            cmds.append(MockLanguageModel._cmd(light, power_cap, MockLanguageModel._power_value(power_cap, on=True)))
+        if bright_cap:
+            cmds.append(MockLanguageModel._cmd(light, bright_cap, str(brightness)))
+        return cmds
 
     # ------------------------------------------------------------ matching
     @staticmethod
