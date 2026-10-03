@@ -10,11 +10,11 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, ROOMS, type Settings } from './src/settings';
@@ -52,50 +52,52 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.screen}>
-      <StatusBar style="light" />
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.screen}>
+        <StatusBar style="light" />
 
-      <ConnectionBar
-        state={session.state}
-        room={roomName}
-        serverUrl={settings.serverUrl}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onClear={session.clear}
-      />
+        <ConnectionBar
+          state={session.state}
+          room={roomName}
+          serverUrl={settings.serverUrl}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onClear={session.clear}
+        />
 
-      {session.error && (
-        <Pressable onPress={session.dismissError} style={styles.error}>
-          <Text style={styles.errorText}>{session.error}</Text>
-          <Text style={styles.errorHint}>Chạm để ẩn</Text>
-        </Pressable>
-      )}
+        {session.error && (
+          <Pressable onPress={session.dismissError} style={styles.error}>
+            <Text style={styles.errorText}>{session.error}</Text>
+            <Text style={styles.errorHint}>Chạm để ẩn</Text>
+          </Pressable>
+        )}
 
-      {session.state === 'offline' && !session.error && (
-        <Pressable onPress={session.connect} style={styles.retry}>
-          <Text style={styles.retryText}>Chạm để kết nối lại</Text>
-        </Pressable>
-      )}
+        {session.state === 'offline' && !session.error && (
+          <Pressable onPress={session.connect} style={styles.retry}>
+            <Text style={styles.retryText}>Chạm để kết nối lại</Text>
+          </Pressable>
+        )}
 
-      <View style={styles.body}>
-        <Transcript messages={session.messages} partial={session.partial} />
-      </View>
+        <View style={styles.body}>
+          <Transcript messages={session.messages} partial={session.partial} />
+        </View>
 
-      <TalkButton
-        recording={session.recording}
-        speaking={session.speaking}
-        enabled={session.state === 'ready'}
-        level={session.level}
-        onPressIn={() => void session.startTalking()}
-        onPressOut={() => void session.stopTalking()}
-      />
+        <TalkButton
+          recording={session.recording}
+          speaking={session.speaking}
+          enabled={session.state === 'ready'}
+          level={session.level}
+          onPressIn={() => void session.startTalking()}
+          onPressOut={() => void session.stopTalking()}
+        />
 
-      <SettingsModal
-        visible={settingsOpen}
-        settings={settings ?? DEFAULT_SETTINGS}
-        onClose={() => setSettingsOpen(false)}
-        onSave={persist}
-      />
-    </SafeAreaView>
+        <SettingsModal
+          visible={settingsOpen}
+          settings={settings ?? DEFAULT_SETTINGS}
+          onClose={() => setSettingsOpen(false)}
+          onSave={persist}
+        />
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
