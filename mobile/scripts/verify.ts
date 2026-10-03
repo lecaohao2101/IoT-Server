@@ -23,7 +23,13 @@ import {
   TARGET_SAMPLE_RATE,
 } from '../src/pcm.ts';
 import { describeCommand, parseServerFrame } from '../src/protocol.ts';
-import { DEFAULT_SETTINGS, voiceSocketUrl, httpUrl, authHeaders } from '../src/settings.ts';
+import {
+  DEFAULT_SETTINGS,
+  DEPLOYED_SERVER_URL,
+  authHeaders,
+  httpUrl,
+  voiceSocketUrl,
+} from '../src/settings.ts';
 
 let passed = 0;
 let failed = 0;
@@ -207,6 +213,17 @@ test('httpUrl và authHeaders dùng chung cách chuẩn hoá', () => {
     Authorization: 'Bearer k',
   });
   assert.deepEqual(authHeaders({ ...DEFAULT_SETTINGS, token: '   ' }), {});
+});
+
+test('mặc định trỏ thẳng vào server đã deploy, quét QR là chạy', () => {
+  assert.equal(DEFAULT_SETTINGS.serverUrl, DEPLOYED_SERVER_URL);
+  assert.ok(DEPLOYED_SERVER_URL.startsWith('https://'), DEPLOYED_SERVER_URL);
+  assert.ok(voiceSocketUrl(DEFAULT_SETTINGS).startsWith('wss://'));
+});
+
+test('token KHÔNG được nhúng sẵn trong app', () => {
+  // Một bí mật dùng chung nằm trong APK thì ai giải nén cũng lấy được.
+  assert.equal(DEFAULT_SETTINGS.token, '');
 });
 
 console.log(`\n${passed} đạt, ${failed} lỗi`);

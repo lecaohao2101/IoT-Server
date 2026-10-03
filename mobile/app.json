@@ -10,7 +10,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Ứng dụng dùng micro để bạn ra lệnh bằng giọng nói cho căn hộ."
-      }
+      },
+      "bundleIdentifier": "com.lecaohao.smartapartment",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +26,9 @@
         "RECORD_AUDIO",
         "INTERNET"
       ],
-      "usesCleartextTraffic": true
+      "usesCleartextTraffic": true,
+      "package": "com.lecaohao.smartapartment",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"

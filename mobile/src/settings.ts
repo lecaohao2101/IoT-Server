@@ -1,10 +1,14 @@
 /**
  * Connection settings, persisted on the device.
  *
- * The server URL is per-installation: a phone on the same Wi-Fi reaches the dev
- * machine by LAN address, which nobody can guess at build time. Being a native
- * app, plain `http://` is fine here -- the secure-origin rule that would block a
- * browser's microphone does not apply.
+ * Defaults to the deployed server so a freshly scanned QR code works without
+ * typing anything. Pointing at a dev machine on the LAN stays one screen away.
+ *
+ * The token is never baked in: it is a shared secret that would ship inside every
+ * APK and be trivially extractable. It is entered on the device and kept here.
+ *
+ * Being a native app, plain `http://` is fine for LAN use -- the secure-origin
+ * rule that blocks a browser's microphone does not apply.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -22,8 +26,11 @@ export type Settings = {
   sessionId: string;
 };
 
+/** Server đã deploy. Đổi trong màn hình Cài đặt khi muốn chạy LAN. */
+export const DEPLOYED_SERVER_URL = 'https://smart-apartment-server.fly.dev';
+
 export const DEFAULT_SETTINGS: Settings = {
-  serverUrl: 'http://192.168.1.10:8000',
+  serverUrl: DEPLOYED_SERVER_URL,
   token: '',
   room: 'living_room',
   sessionId: `mobile-${Math.random().toString(36).slice(2, 10)}`,

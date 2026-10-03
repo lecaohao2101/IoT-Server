@@ -23,7 +23,7 @@ nhìn thấy đúng những lệnh mà server đã chấp nhận hay từ chối
 
 ---
 
-## Chạy thử
+## Chạy thử bằng Expo Go
 
 ```bash
 cd mobile
@@ -31,22 +31,53 @@ npm install
 npm start          # hiện mã QR
 ```
 
-Cài **Expo Go** trên điện thoại, quét mã QR. Điện thoại và máy chạy server phải
-**cùng một mạng Wi-Fi**.
+Cài **Expo Go** trên điện thoại rồi quét mã QR.
 
-Lần đầu mở app, bấm **Cài đặt** và điền địa chỉ LAN của server, ví dụ
-`http://192.168.1.12:8000`. Tìm địa chỉ đó bằng `ipconfig` (Windows) hoặc
-`ifconfig` (macOS/Linux) — **không dùng `localhost`**, vì với điện thoại thì
-`localhost` là chính nó.
+App **mặc định trỏ sẵn vào server đã deploy** (`https://smart-apartment-server.fly.dev`),
+nên quét xong là dùng được ngay, không cần cùng mạng Wi-Fi với máy tính.
 
-Server phải lắng nghe trên mọi interface chứ không chỉ loopback:
+Nếu server đã bật `API_KEY`, vào **Cài đặt** điền đúng giá trị đó vào ô **Token** —
+nếu không mọi request sẽ bị từ chối. Token **không** được nhúng sẵn trong app: đó
+là bí mật dùng chung, nằm trong APK thì ai giải nén cũng lấy được.
+
+### Trỏ về server chạy tại máy
+
+Vào **Cài đặt**, đổi địa chỉ thành IP LAN của máy tính, ví dụ `http://192.168.1.12:8000`
+(`ipconfig` trên Windows để tra). **Không dùng `localhost`** — với điện thoại thì
+`localhost` là chính nó. Và server phải nghe trên mọi interface:
 
 ```bash
 cd ../server
 .venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Nếu server bật `API_KEY`, điền cùng giá trị đó vào ô **Token**.
+---
+
+## Xuất APK
+
+Build standalone chạy trên **EAS** (dịch vụ build của Expo) vì máy này không có
+Android SDK. Cần tài khoản Expo miễn phí.
+
+```bash
+npm install -g eas-cli
+eas login
+eas build --platform android --profile preview
+```
+
+Profile `preview` trong [`eas.json`](eas.json) cho ra **file APK** cài tay được:
+tải link EAS trả về, mở trên điện thoại, cho phép "cài từ nguồn không xác định".
+
+| Profile | Kết quả | Dùng khi |
+|---|---|---|
+| `preview` | APK | gửi cho người khác cài thử |
+| `production` | AAB | nộp lên Google Play (Play không nhận APK cho bản mới) |
+| `development` | APK + dev client | debug native, thay cho Expo Go |
+
+Lần build đầu EAS sẽ hỏi tạo keystore — chọn để EAS quản lý là xong.
+
+> **Khác biệt so với Expo Go:** APK nhúng sẵn `expo-audio` config plugin trong
+> [`app.json`](app.json), nên quyền micro được khai báo đúng vào manifest. Nếu
+> micro chạy trong Expo Go thì trong APK cũng chạy.
 
 ---
 
@@ -102,7 +133,7 @@ scripts/
 
 ```bash
 npm run typecheck   # app + scripts
-npm run verify      # 22 test logic thuần, không cần server
+npm run verify      # 24 test logic thuần, không cần server
 npm run bundle      # bundle Android, bắt lỗi import mà tsc không thấy
 ```
 
