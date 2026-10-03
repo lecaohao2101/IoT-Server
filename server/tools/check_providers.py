@@ -57,6 +57,15 @@ def diagnose(message: str) -> list[str]:
             "API chưa được bật trên project này.",
             "  Console > APIs & Services > Library > tìm API > Enable",
         ]
+    if "speech.recognizers.recognize" in m:
+        return [
+            "Service account thiếu quyền gọi Speech-to-Text (TTS chạy được không",
+            "có nghĩa là STT cũng chạy được -- hai API cần quyền riêng).",
+            "  1. Console > APIs & Services > Library > bật 'Cloud Speech-to-Text API'",
+            "  2. Console > IAM & Admin > IAM > tìm service account",
+            "     > Edit > Add role > 'Cloud Speech-to-Text User' (roles/speech.client)",
+            "  Quyền IAM mất khoảng 1-2 phút để có hiệu lực.",
+        ]
     if "permission" in m and "denied" in m:
         return [
             "Service account thiếu quyền. Cấp thêm role cho phép gọi API này,",

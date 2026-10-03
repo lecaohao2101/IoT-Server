@@ -131,8 +131,9 @@ local.properties
 # -----------------------------------------------------------------------------
 *.log
 logs/
-# tools/simulate_client.py ghi file âm thanh trả lời ra đây
-reply.wav
+# âm thanh sinh ra khi chạy thử (simulate_client.py, check_providers.py)
+*.wav
+*.mp3
 recordings/
 *.sqlite
 *.sqlite3
