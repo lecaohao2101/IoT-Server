@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "types": ["node"],
+    "lib": ["ES2023"],
+    "jsx": "preserve"
+  },
+  "include": ["./**/*.ts"],
+  "exclude": []
+}
