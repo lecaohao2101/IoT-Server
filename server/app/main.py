@@ -64,13 +64,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
 
+    # Clients authenticate with a Bearer token, never a cookie, so credentialed
+    # cross-origin requests are not needed. Combining them with a wildcard origin
+    # is also invalid per the CORS spec -- and here it would have let any page a
+    # user visits drive the apartment through their browser.
+    wildcard = "*" in settings.cors_origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
-        allow_credentials=True,
+        allow_credentials=not wildcard,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    if wildcard and settings.app_env != "dev":
+        log.warning(
+            "CORS allows every origin. Set CORS_ORIGINS to the domains that should "
+            "be able to call this server.",
+            extra={"env": settings.app_env},
+        )
 
     @app.middleware("http")
     async def trace_and_time(request: Request, call_next):

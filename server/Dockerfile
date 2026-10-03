@@ -17,9 +17,14 @@ RUN python -m venv /opt/venv \
 # -------------------------------------------------------------- runtime stage
 FROM python:3.12-slim AS runtime
 
+# Stamped at build time so /api/v1/system/info can say which commit is running:
+#   fly deploy --build-arg BUILD_SHA=$(git rev-parse --short HEAD)
+ARG BUILD_SHA=unknown
+
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    BUILD_SHA=${BUILD_SHA} \
     APP_ENV=prod
 
 # curl is here for the healthcheck only; everything else stays out of the image.

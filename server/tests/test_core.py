@@ -270,16 +270,21 @@ def test_existing_environment_wins_over_dotenv(tmp_path, monkeypatch):
     assert os.environ["GOOGLE_APPLICATION_CREDENTIALS"] == "/already/set.json"
 
 
-def test_staging_without_api_key_is_allowed_but_must_warn(caplog):
-    """`prod` is refused outright; `staging` is permitted (Fly previews use it)
-    but must not slip out silently -- an open server controls a real apartment."""
+def test_deliberately_open_deployment_still_warns_on_every_boot(caplog):
+    """`prod` is refused outright and `staging` needs ALLOW_ANONYMOUS; even then
+    the warning must appear, because an open server controls a real apartment."""
     import asyncio
     import logging
 
     from app.container import AppContainer
 
     settings = Settings(
-        _env_file=None, app_env="staging", api_key=None, redis_url=None, mqtt_enabled=False
+        _env_file=None,
+        app_env="staging",
+        api_key=None,
+        allow_anonymous=True,
+        redis_url=None,
+        mqtt_enabled=False,
     )
     assert not settings.auth_enabled
 
@@ -290,3 +295,82 @@ def test_staging_without_api_key_is_allowed_but_must_warn(caplog):
     with caplog.at_level(logging.WARNING):
         asyncio.run(build())
     assert any("AUTHENTICATION IS DISABLED" in r.message for r in caplog.records)
+
+
+# ------------------------------------------------- open-deployment guard
+
+
+def test_deployed_without_api_key_refuses_to_start():
+    """A public URL that actuates an apartment must not run open by accident."""
+    with pytest.raises(ValueError, match="ALLOW_ANONYMOUS"):
+        Settings(_env_file=None, app_env="staging", api_key=None)
+
+
+def test_open_deployment_is_allowed_when_asked_for_explicitly():
+    settings = Settings(_env_file=None, app_env="staging", api_key=None, allow_anonymous=True)
+    assert not settings.auth_enabled
+
+
+def test_api_key_satisfies_the_guard_without_the_escape_hatch():
+    settings = Settings(_env_file=None, app_env="staging", api_key="k")
+    assert settings.auth_enabled
+
+
+def test_dev_still_runs_open_without_ceremony():
+    assert Settings(_env_file=None, app_env="dev", api_key=None).auth_enabled is False
+
+
+# --------------------------------------------- inline google credentials
+
+
+def test_inline_credentials_are_written_to_a_private_file(monkeypatch):
+    """Hosts like Fly deliver secrets as env vars; the SDKs only read paths."""
+    import json
+    import os
+
+    from app.ai.registry import apply_google_credentials
+
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    document = {"type": "service_account", "client_email": "bot@example.iam.gserviceaccount.com"}
+    apply_google_credentials(
+        Settings(_env_file=None, google_credentials_json=json.dumps(document))
+    )
+
+    written = os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+    from pathlib import Path
+
+    assert json.loads(Path(written).read_text(encoding="utf-8")) == document
+
+
+def test_inline_credentials_win_over_a_file_path(monkeypatch, tmp_path):
+    import json
+    import os
+    from pathlib import Path
+
+    from app.ai.registry import apply_google_credentials
+
+    unused = tmp_path / "from-disk.json"
+    unused.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(unused))
+
+    apply_google_credentials(
+        Settings(
+            _env_file=None,
+            google_application_credentials=unused,
+            google_credentials_json=json.dumps(
+                {"type": "service_account", "client_email": "bot@example.com"}
+            ),
+        )
+    )
+    assert Path(os.environ["GOOGLE_APPLICATION_CREDENTIALS"]) != unused
+
+
+def test_malformed_inline_credentials_fail_at_startup(monkeypatch):
+    from app.ai.registry import apply_google_credentials
+    from app.core.errors import ConfigError
+
+    monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+    with pytest.raises(ConfigError):
+        apply_google_credentials(Settings(_env_file=None, google_credentials_json="not json"))
+    with pytest.raises(ConfigError, match="service-account"):
+        apply_google_credentials(Settings(_env_file=None, google_credentials_json='{"a": 1}'))

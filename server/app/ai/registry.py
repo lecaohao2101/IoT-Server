@@ -9,8 +9,12 @@ refusing to boot.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import logging
 import os
+import tempfile
+from pathlib import Path
 
 from app.ai.base import LanguageModel, SpeechRecognizer, SpeechSynthesizer
 from app.ai.llm.mock import MockLanguageModel
@@ -38,6 +42,12 @@ def apply_google_credentials(settings: Settings) -> None:
     if project:
         os.environ.setdefault("GOOGLE_CLOUD_PROJECT", project)
 
+    inline = settings.google_credentials_json
+    if inline is not None:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(_materialise(inline.get_secret_value()))
+        log.info("google credentials loaded from GOOGLE_CREDENTIALS_JSON")
+        return
+
     configured = settings.google_application_credentials
     if configured is None:
         return
@@ -49,6 +59,27 @@ def apply_google_credentials(settings: Settings) -> None:
         )
     os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(resolved))
     log.info("google credentials configured", extra={"path": str(resolved)})
+
+
+def _materialise(raw: str) -> Path:
+    """Write an inline service account to a private file the SDKs can open.
+
+    Google's libraries only read credentials from a path, so a secret delivered
+    as an environment variable has to land on disk somewhere. It goes to the
+    process temp directory with owner-only permissions, never into the project.
+    """
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ConfigError(f"GOOGLE_CREDENTIALS_JSON is not valid JSON: {exc}") from exc
+    if not isinstance(parsed, dict) or "client_email" not in parsed:
+        raise ConfigError("GOOGLE_CREDENTIALS_JSON is not a service-account document")
+
+    path = Path(tempfile.gettempdir()) / "smart-apartment-google-credentials.json"
+    path.write_text(raw, encoding="utf-8")
+    with contextlib.suppress(OSError):  # no-op on Windows, meaningful on Linux
+        path.chmod(0o600)
+    return path
 
 
 def _fail_or_fallback(settings: Settings, stage: str, exc: Exception, fallback):

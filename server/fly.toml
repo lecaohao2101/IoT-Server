@@ -6,6 +6,9 @@ primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"
+  # fly deploy --build-arg BUILD_SHA=$(git rev-parse --short HEAD)
+  [build.args]
+    BUILD_SHA = "unknown"
 
 [env]
   HOST = "0.0.0.0"
@@ -18,6 +21,16 @@ primary_region = "sin"
   STT_PROVIDER = "mock"
   TTS_PROVIDER = "mock"
   LLM_PROVIDER = "mock"
+  # Restrict once a real front-end domain exists. "*" lets any page call this API.
+  CORS_ORIGINS = "*"
+
+# Secrets are never written here -- set them with `fly secrets set`:
+#   API_KEY               bắt buộc, nếu không server sẽ từ chối khởi động
+#   ALLOW_ANONYMOUS       đặt "true" nếu CỐ Ý chạy demo mở, không xác thực
+#   GEMINI_API_KEY        cho LLM_PROVIDER=google
+#   GOOGLE_PROJECT_ID     cho STT/TTS_PROVIDER=google
+#   GOOGLE_CREDENTIALS_JSON   nội dung service account, dán cả file JSON
+#   REDIS_URL             thay cho bộ nhớ tiến trình, state sống qua mỗi lần deploy
 
 [http_service]
   internal_port = 8000

@@ -402,7 +402,74 @@ chia sẻ một Redis. `Settings` đã chặn cấu hình prod dùng bộ nhớ 
 
 ---
 
-## 10. Phát triển
+## 10. Triển khai lên Fly.io
+
+```bash
+cd server
+fly deploy --build-arg BUILD_SHA=$(git rev-parse --short HEAD)
+```
+
+`BUILD_SHA` để `GET /api/v1/system/info` nói được chính xác commit nào đang chạy —
+không có nó thì không cách gì biết bản trên mạng có phải bản bạn vừa sửa hay không.
+
+### Secrets — không bao giờ nằm trong `fly.toml`
+
+```bash
+fly secrets set API_KEY=$(openssl rand -hex 24)        # bắt buộc
+fly secrets set GEMINI_API_KEY=...                     # nếu LLM_PROVIDER=google
+fly secrets set GOOGLE_PROJECT_ID=...
+fly secrets set GOOGLE_CREDENTIALS_JSON="$(cat credentials/service-account.json)"
+fly secrets set REDIS_URL=redis://default:...@...      # nếu cần state bền
+```
+
+`GOOGLE_CREDENTIALS_JSON` tồn tại vì Fly chỉ cấp secret dưới dạng biến môi trường,
+trong khi thư viện Google chỉ đọc credentials từ **đường dẫn file**. Server tự ghi
+nội dung đó ra file tạm, quyền chỉ chủ sở hữu đọc được, trước khi dựng client.
+
+### Server công khai bắt buộc có xác thực
+
+Với `APP_ENV` khác `dev`, **không có `API_KEY` thì server từ chối khởi động**. Đây
+là chủ ý: URL triển khai ai biết cũng gọi được, mà server này đóng/mở thiết bị
+thật trong nhà. Muốn chạy demo mở thì phải nói rõ:
+
+```bash
+fly secrets set ALLOW_ANONYMOUS=true
+```
+
+Lúc đó mỗi lần khởi động vẫn ghi một dòng cảnh báo vào log.
+
+### CORS
+
+`CORS_ORIGINS="*"` khiến mọi trang web gọi được API này. Server không gửi
+`Access-Control-Allow-Credentials` khi origin là `*` — vừa đúng chuẩn CORS, vừa
+tránh việc một trang bất kỳ người dùng ghé thăm lại điều khiển được căn hộ qua
+trình duyệt của họ. Khi đã có domain front-end thật, khai báo cụ thể:
+
+```bash
+fly secrets set CORS_ORIGINS=https://app.example.com
+```
+
+### Những giới hạn của cấu hình mặc định
+
+| Mặc định trong `fly.toml` | Hệ quả |
+|---|---|
+| `REDIS_URL` trống | State và hội thoại nằm trong tiến trình, **mất sạch mỗi lần deploy**, và không chia sẻ được giữa nhiều máy |
+| `MQTT_ENABLED=false` | Transport loopback: lệnh tự phản hồi, không có thiết bị thật nào nhận |
+| `*_PROVIDER=mock` | Không gọi Google, không tốn tiền, nhưng cũng không nhận dạng được giọng nói thật |
+
+Để nối MQTT thật, deploy broker rồi trỏ vào DNS nội bộ của Fly:
+
+```bash
+fly secrets set MQTT_ENABLED=true MQTT_HOST=smart-apartment-mosquitto.internal
+```
+
+Một worker cho mỗi máy: phiên WebSocket và kết nối MQTT là trạng thái theo tiến
+trình. Muốn chạy nhiều máy thì **bắt buộc** có `REDIS_URL` chung, và load balancer
+phải sticky theo phiên.
+
+---
+
+## 11. Phát triển
 
 ```bash
 make test       # hoặc: .venv/Scripts/python.exe -m pytest -q
@@ -416,7 +483,7 @@ giao thức WebSocket thật — chỉ thay store bằng bộ nhớ và MQTT b�
 có gì mock phần đang được test; chỉ bỏ phần mạng.
 
 ```
-130 passed
+138 passed
 ```
 
 Trọng tâm test: bộ validator (giá trị sai, kẹp giá trị, giờ yên tĩnh, xác nhận,
@@ -445,7 +512,7 @@ tests/               124 test
 
 ---
 
-## 11. Ghi chú cho firmware ESP32
+## 12. Ghi chú cho firmware ESP32
 
 1. **Định dạng âm thanh**: I2S → PCM 16-bit, 16 kHz, mono. Gửi thẳng khung nhị
    phân, không bọc WAV. Khung 20 ms (640 byte) là kích thước hợp lý.

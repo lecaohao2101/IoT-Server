@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # ---------------------------------------------------------------- app
     app_name: str = "smart-apartment-server"
     app_env: Literal["dev", "staging", "prod"] = "dev"
+    #: Set at image build time. Without it there is no way to tell which
+    #: commit a running deployment came from.
+    build_sha: str | None = None
     debug: bool = False
     host: str = "0.0.0.0"
     port: int = 8000
@@ -36,6 +39,10 @@ class Settings(BaseSettings):
     # ----------------------------------------------------------- security
     api_key: SecretStr | None = None
     device_tokens: dict[str, str] = Field(default_factory=dict)
+    #: Explicit opt-in to running without authentication outside `dev`. Exists so
+    #: an open demo deployment is something somebody chose, never something that
+    #: happened because a secret was not set.
+    allow_anonymous: bool = False
 
     # --------------------------------------------------------- descriptors
     home_config_path: Path = Path("config/home.yaml")
@@ -70,6 +77,11 @@ class Settings(BaseSettings):
     google_project_id: str | None = None
     google_location: str = "global"
     google_application_credentials: Path | None = None
+    #: The service-account JSON itself, for hosts where secrets are environment
+    #: variables and there is no filesystem to mount a key into (Fly, Heroku,
+    #: Cloud Run). Written to a private temp file at startup. Takes precedence
+    #: over GOOGLE_APPLICATION_CREDENTIALS.
+    google_credentials_json: SecretStr | None = None
 
     stt_language: str = "vi-VN"
     stt_alt_languages: list[str] = Field(default_factory=list)
@@ -127,7 +139,9 @@ class Settings(BaseSettings):
         # coerce the way a plain `int` annotation would.
         return int(v) if isinstance(v, str) and v.strip().isdigit() else v
 
-    @field_validator("api_key", "gemini_api_key", "mqtt_password", mode="before")
+    @field_validator(
+        "api_key", "gemini_api_key", "mqtt_password", "google_credentials_json", mode="before"
+    )
     @classmethod
     def _blank_to_none(cls, v: Any) -> Any:
         return None if isinstance(v, str) and not v.strip() else v
@@ -156,6 +170,16 @@ class Settings(BaseSettings):
                 problems.append("DEBUG must be false when APP_ENV=prod")
             if problems:
                 raise ValueError("; ".join(problems))
+
+        # A deployed server is reachable by anyone who learns its URL, and this
+        # one actuates a physical apartment. Running it open has to be a decision
+        # somebody typed, not a default nobody noticed.
+        if self.app_env != "dev" and self.api_key is None and not self.allow_anonymous:
+            raise ValueError(
+                f"APP_ENV={self.app_env} without API_KEY would expose device control to "
+                "anyone who can reach this server. Set API_KEY, or set "
+                "ALLOW_ANONYMOUS=true to accept that risk deliberately."
+            )
         if self.llm_provider == "google" and self.gemini_api_key is None:
             raise ValueError("LLM_PROVIDER=google requires GEMINI_API_KEY")
         if self.stt_provider == "google" and not self.google_project_id:

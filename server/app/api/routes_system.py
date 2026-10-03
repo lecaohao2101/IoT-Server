@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Response, status
 
+from app import __version__
 from app.api.deps import Container
 
 router = APIRouter(tags=["system"])
@@ -31,6 +32,8 @@ async def system_info(container: Container) -> dict[str, Any]:
     settings = container.settings
     return {
         "app": settings.app_name,
+        "version": __version__,
+        "build": settings.build_sha,
         "env": settings.app_env,
         "uptime_s": round(container.uptime_s, 1),
         "home": {
@@ -58,4 +61,5 @@ async def system_info(container: Container) -> dict[str, Any]:
             "quiet_hours_now": container.validator.in_quiet_hours(),
         },
         "auth_required": settings.auth_enabled,
+        "anonymous_allowed": not settings.auth_enabled,
     }
