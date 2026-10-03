@@ -1,0 +1,401 @@
+# =============================================================================
+#  Mô tả căn hộ thông minh — nguồn sự thật duy nhất cho toàn bộ hệ thống.
+#
+#  File này sinh ra: danh mục thiết bị trong prompt của LLM, bảng topic MQTT,
+#  luật kiểm tra giá trị của bộ validator, và dữ liệu cho dashboard.
+#  Thêm thiết bị = sửa file này, không cần sửa code.
+#
+#  Topic MQTT mặc định (nếu không khai báo mqtt.*):
+#    home/<room>/<device_id>/set | /state | /availability
+# =============================================================================
+
+name: "Căn hộ thông minh"
+timezone: "Asia/Ho_Chi_Minh"
+language: "vi-VN"
+
+rooms:
+  - id: living_room
+    name: "Phòng khách"
+    aliases: ["phòng khách", "phong khach", "sofa", "phòng sinh hoạt"]
+  - id: kitchen
+    name: "Phòng bếp"
+    aliases: ["phòng bếp", "bếp", "nhà bếp", "phong bep"]
+  - id: bedroom
+    name: "Phòng ngủ"
+    aliases: ["phòng ngủ", "phong ngu", "giường"]
+  - id: bathroom
+    name: "Phòng tắm"
+    aliases: ["phòng tắm", "nhà tắm", "phong tam", "toilet"]
+  - id: balcony
+    name: "Ban công"
+    aliases: ["ban công", "ban cong", "ngoài trời"]
+
+devices:
+  # ------------------------------------------------------------ phòng khách
+  - id: living_room_light
+    name: "Đèn phòng khách"
+    type: light
+    room: living_room
+    aliases: ["đèn phòng khách", "đèn khách", "đèn trần phòng khách"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+        description: "Bật / tắt đèn"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 80
+      color_temp:
+        kind: number
+        minimum: 2700
+        maximum: 6500
+        step: 100
+        unit: "K"
+        default: 4000
+
+  - id: living_room_ac
+    name: "Điều hòa phòng khách"
+    type: air_conditioner
+    room: living_room
+    aliases: ["điều hòa phòng khách", "máy lạnh phòng khách"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      temperature:
+        kind: number
+        minimum: 16
+        maximum: 30
+        step: 1
+        unit: "°C"
+        default: 26
+      mode:
+        kind: enum
+        values: ["cool", "dry", "fan", "auto"]
+        default: "cool"
+      fan_speed:
+        kind: enum
+        values: ["auto", "low", "medium", "high"]
+        default: "auto"
+
+  - id: living_room_curtain
+    name: "Rèm phòng khách"
+    type: curtain
+    room: living_room
+    aliases: ["rèm phòng khách", "rèm cửa phòng khách", "màn cửa"]
+    capabilities:
+      state:
+        kind: enum
+        values: ["open", "closed", "stop"]
+        default: "closed"
+      position:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 5
+        unit: "%"
+        default: 0
+        description: "0 = đóng hẳn, 100 = mở hết"
+
+  - id: living_room_tv
+    name: "Tivi phòng khách"
+    type: tv
+    room: living_room
+    aliases: ["tivi", "ti vi", "tv phòng khách"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      volume:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 25
+
+  - id: living_room_sensor
+    name: "Cảm biến phòng khách"
+    type: sensor
+    room: living_room
+    aliases: ["cảm biến phòng khách", "nhiệt độ phòng khách"]
+    capabilities:
+      temperature:
+        kind: number
+        minimum: -10
+        maximum: 60
+        unit: "°C"
+        read_only: true
+        default: 28
+      humidity:
+        kind: number
+        minimum: 0
+        maximum: 100
+        unit: "%"
+        read_only: true
+        default: 65
+
+  # --------------------------------------------------------------- phòng bếp
+  - id: kitchen_light
+    name: "Đèn bếp"
+    type: light
+    room: kitchen
+    aliases: ["đèn bếp", "đèn nhà bếp", "đèn phòng bếp"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 90
+
+  - id: kitchen_outlet
+    name: "Ổ cắm bếp"
+    type: outlet
+    room: kitchen
+    aliases: ["ổ cắm bếp", "ổ điện bếp"]
+    capabilities:
+      power:
+        kind: boolean
+        default: false
+      power_draw:
+        kind: number
+        minimum: 0
+        maximum: 3500
+        unit: "W"
+        read_only: true
+        default: 0
+
+  - id: kitchen_sensor
+    name: "Cảm biến bếp"
+    type: sensor
+    room: kitchen
+    aliases: ["cảm biến bếp", "cảm biến khí gas"]
+    capabilities:
+      temperature:
+        kind: number
+        minimum: -10
+        maximum: 80
+        unit: "°C"
+        read_only: true
+        default: 30
+      gas_alarm:
+        kind: boolean
+        read_only: true
+        default: false
+
+  # --------------------------------------------------------------- phòng ngủ
+  - id: bedroom_light
+    name: "Đèn phòng ngủ"
+    type: light
+    room: bedroom
+    aliases: ["đèn phòng ngủ", "đèn ngủ"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 60
+
+  - id: bedroom_ac
+    name: "Điều hòa phòng ngủ"
+    type: air_conditioner
+    room: bedroom
+    aliases: ["điều hòa phòng ngủ", "máy lạnh phòng ngủ"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      temperature:
+        kind: number
+        minimum: 16
+        maximum: 30
+        step: 1
+        unit: "°C"
+        default: 26
+      mode:
+        kind: enum
+        values: ["cool", "dry", "fan", "auto"]
+        default: "cool"
+      fan_speed:
+        kind: enum
+        values: ["auto", "low", "medium", "high"]
+        default: "auto"
+
+  - id: bedroom_curtain
+    name: "Rèm phòng ngủ"
+    type: curtain
+    room: bedroom
+    aliases: ["rèm phòng ngủ"]
+    capabilities:
+      state:
+        kind: enum
+        values: ["open", "closed", "stop"]
+        default: "closed"
+      position:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 5
+        unit: "%"
+        default: 0
+
+  - id: bedroom_sensor
+    name: "Cảm biến phòng ngủ"
+    type: sensor
+    room: bedroom
+    aliases: ["cảm biến phòng ngủ", "nhiệt độ phòng ngủ"]
+    capabilities:
+      temperature:
+        kind: number
+        minimum: -10
+        maximum: 60
+        unit: "°C"
+        read_only: true
+        default: 27
+      humidity:
+        kind: number
+        minimum: 0
+        maximum: 100
+        unit: "%"
+        read_only: true
+        default: 60
+
+  # -------------------------------------------------------------- phòng tắm
+  - id: bathroom_light
+    name: "Đèn phòng tắm"
+    type: light
+    room: bathroom
+    aliases: ["đèn phòng tắm", "đèn nhà tắm"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 5
+        unit: "%"
+        default: 100
+
+  - id: bathroom_water_heater
+    name: "Bình nóng lạnh"
+    type: water_heater
+    room: bathroom
+    aliases: ["bình nóng lạnh", "máy nước nóng"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      temperature:
+        kind: number
+        minimum: 30
+        maximum: 70
+        step: 1
+        unit: "°C"
+        default: 45
+
+  # --------------------------------------------------------------- ban công
+  - id: balcony_sensor
+    name: "Cảm biến ban công"
+    type: sensor
+    room: balcony
+    aliases: ["cảm biến ban công", "thời tiết ngoài trời"]
+    capabilities:
+      temperature:
+        kind: number
+        minimum: -10
+        maximum: 60
+        unit: "°C"
+        read_only: true
+        default: 31
+      humidity:
+        kind: number
+        minimum: 0
+        maximum: 100
+        unit: "%"
+        read_only: true
+        default: 70
+
+  # ------------------------------------------------------------------- cửa
+  - id: front_door_lock
+    name: "Khóa cửa chính"
+    type: lock
+    room: living_room
+    aliases: ["khóa cửa", "cửa chính", "khóa cửa chính"]
+    capabilities:
+      locked:
+        kind: boolean
+        default: true
+        sensitive: true        # luôn phải hỏi lại người dùng trước khi đổi
+        description: "true = đã khóa"
+
+scenes:
+  - id: good_night
+    name: "Chế độ ngủ"
+    aliases: ["ngủ ngon", "chế độ ngủ", "đi ngủ", "chuc ngu ngon"]
+    description: "Tắt đèn chung, dịu đèn ngủ, đóng rèm, đặt điều hòa 26 độ"
+    actions:
+      - { device_id: living_room_light, capability: power, value: "off" }
+      - { device_id: kitchen_light, capability: power, value: "off" }
+      - { device_id: living_room_tv, capability: power, value: "off" }
+      - { device_id: bedroom_light, capability: power, value: "on" }
+      - { device_id: bedroom_light, capability: brightness, value: "15" }
+      - { device_id: bedroom_curtain, capability: state, value: "closed" }
+      - { device_id: bedroom_ac, capability: power, value: "on" }
+      - { device_id: bedroom_ac, capability: temperature, value: "26" }
+
+  - id: leaving_home
+    name: "Chế độ ra ngoài"
+    aliases: ["ra ngoài", "đi làm", "rời nhà", "ra khoi nha"]
+    description: "Tắt toàn bộ thiết bị tiêu thụ điện"
+    actions:
+      - { device_id: living_room_light, capability: power, value: "off" }
+      - { device_id: kitchen_light, capability: power, value: "off" }
+      - { device_id: bedroom_light, capability: power, value: "off" }
+      - { device_id: bathroom_light, capability: power, value: "off" }
+      - { device_id: living_room_ac, capability: power, value: "off" }
+      - { device_id: bedroom_ac, capability: power, value: "off" }
+      - { device_id: living_room_tv, capability: power, value: "off" }
+
+  - id: movie_time
+    name: "Chế độ xem phim"
+    aliases: ["xem phim", "chế độ phim", "xem film"]
+    description: "Giảm đèn phòng khách, đóng rèm, bật tivi"
+    actions:
+      - { device_id: living_room_light, capability: power, value: "on" }
+      - { device_id: living_room_light, capability: brightness, value: "20" }
+      - { device_id: living_room_curtain, capability: state, value: "closed" }
+      - { device_id: living_room_tv, capability: power, value: "on" }
+
+  - id: wake_up
+    name: "Chế độ thức dậy"
+    aliases: ["thức dậy", "buổi sáng", "chào buổi sáng"]
+    description: "Mở rèm, bật đèn dịu, tắt điều hòa phòng ngủ"
+    actions:
+      - { device_id: bedroom_curtain, capability: state, value: "open" }
+      - { device_id: bedroom_light, capability: power, value: "on" }
+      - { device_id: bedroom_light, capability: brightness, value: "50" }
+      - { device_id: bedroom_ac, capability: power, value: "off" }

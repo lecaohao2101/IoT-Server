@@ -1,0 +1,78 @@
+# Full local stack: broker, state store, server.
+#
+#   docker compose up --build
+#   docker compose --profile sim up          # plus a simulated apartment
+#
+# Google credentials: drop the service-account JSON in ./credentials and set
+# GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/google.json in .env.
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: sa-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./deploy/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -W 3 >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sa-redis
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  server:
+    build: .
+    container_name: sa-server
+    depends_on:
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-dev}
+      HOST: 0.0.0.0
+      PORT: "8000"
+      REDIS_URL: redis://redis:6379/0
+      MQTT_ENABLED: "true"
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+    volumes:
+      - ./config:/app/config:ro
+      - ./credentials:/run/secrets:ro
+    restart: unless-stopped
+
+  # Simulated apartment on the MQTT bus -- no hardware required.
+  apartment:
+    build: .
+    container_name: sa-apartment
+    profiles: ["sim"]
+    depends_on:
+      mosquitto:
+        condition: service_started
+    command: ["python", "tools/fake_device.py", "--host", "mosquitto", "--port", "1883"]
+    volumes:
+      - ./config:/app/config:ro
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+  mosquitto-data:

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smart-apartment-server"
+version = "1.0.0"
+description = "Voice-first smart apartment backend: FastAPI + WebSocket audio + MQTT control + STT/LLM/TTS pipeline"
+requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "C4", "SIM"]
+# B008: FastAPI Depends() in defaults is the framework idiom.
+# E501: line length is enforced by the formatter, not the linter.
+# UP042: `str, Enum` keeps values JSON-serialisable for pydantic and OpenAPI.
+# ASYNC109: explicit `timeout` parameters are part of our provider contracts.
+ignore = ["B008", "E501", "UP042", "ASYNC109"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_ignores = true
+ignore_missing_imports = true

@@ -1,0 +1,168 @@
+# =============================================================================
+#  Smart Apartment — .gitignore cho toàn bộ dự án
+#  (server Python, firmware ESP32, mobile app)
+#
+#  Nguyên tắc: không bao giờ commit bí mật, build artifact, hay thứ sinh ra được
+#  từ source. Khi cần giữ một thư mục rỗng, dùng cặp `dir/*` + `!dir/.gitkeep`.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+#  BÍ MẬT — mục này quan trọng nhất, đừng nới lỏng
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.json.key
+service-account*.json
+google-credentials*.json
+
+# Thư mục chứa credentials của Google Cloud (docker-compose mount vào /run/secrets)
+**/credentials/*
+!**/credentials/.gitkeep
+
+# Khóa ký app di động
+**/key.properties
+**/android/app/google-services.json
+**/ios/Runner/GoogleService-Info.plist
+
+# -----------------------------------------------------------------------------
+#  Python / server
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+pip-wheel-metadata/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Test & tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# -----------------------------------------------------------------------------
+#  Firmware ESP32
+# -----------------------------------------------------------------------------
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+.gcc-flags.json
+
+# ESP-IDF
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.ci
+managed_components/
+dependencies.lock
+
+# Arduino IDE
+*.ino.cpp
+*.bin
+*.elf
+*.map
+
+# -----------------------------------------------------------------------------
+#  Mobile app
+# -----------------------------------------------------------------------------
+# Node / React Native
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.expo/
+.expo-shared/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+**/generated_plugin_registrant.dart
+
+# Android
+*.apk
+*.aab
+*.ap_
+*.dex
+local.properties
+.gradle/
+**/android/.gradle/
+**/android/app/build/
+**/android/captures/
+
+# iOS / macOS
+*.ipa
+*.dSYM.zip
+*.dSYM
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
+# -----------------------------------------------------------------------------
+#  Dữ liệu chạy thử & artifact sinh ra khi dev
+# -----------------------------------------------------------------------------
+*.log
+logs/
+# tools/simulate_client.py ghi file âm thanh trả lời ra đây
+reply.wav
+recordings/
+*.sqlite
+*.sqlite3
+*.db
+# snapshot của Redis
+dump.rdb
+mosquitto-data/
+
+# -----------------------------------------------------------------------------
+#  IDE / editor
+# -----------------------------------------------------------------------------
+.vscode/*
+!.vscode/settings.json.example
+!.vscode/extensions.json
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.history/
+
+# -----------------------------------------------------------------------------
+#  Hệ điều hành
+# -----------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes

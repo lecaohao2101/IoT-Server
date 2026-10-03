@@ -1,0 +1,6 @@
+# Optional cloud AI providers. The server runs without these using the mock
+# providers (STT_PROVIDER / TTS_PROVIDER / LLM_PROVIDER = mock).
+-r requirements.txt
+google-genai>=1.20,<3.0
+google-cloud-speech>=2.27,<3.0
+google-cloud-texttospeech>=2.17,<3.0

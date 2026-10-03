@@ -1,0 +1,69 @@
+# =============================================================================
+#  Chính sách an toàn — chạy SAU khi LLM trả lời, trước khi lệnh xuống phần cứng.
+#
+#  Đây là lớp phòng thủ thật sự: prompt có thể bị dẫn dụ, luật trong file này
+#  thì không. Mọi lệnh — dù phát sinh từ giọng nói hay từ nút bấm trên app —
+#  đều đi qua đúng bộ luật này.
+#
+#  Selector khớp theo device_id / device_type / room / capability.
+#  Trường nào bỏ trống nghĩa là "khớp tất cả".
+# =============================================================================
+
+max_commands_per_plan: 8
+max_delay_s: 3600
+require_device_online: false      # bật true nếu muốn từ chối lệnh tới thiết bị mất kết nối
+
+quiet_hours:
+  enabled: true
+  start: "22:00"
+  end: "06:00"
+  note: "đang trong khung giờ yên tĩnh"
+
+limits:
+  # Điều hòa: không cho đặt dưới 18°C (hại máy, hại sức khỏe) dù thiết bị cho tới 16
+  - match: { device_type: air_conditioner, capability: temperature }
+    minimum: 18
+    maximum: 30
+    message: "nhiệt độ điều hòa được giữ trong khoảng 18–30 độ"
+
+  # Bình nóng lạnh: trần 60°C để tránh bỏng
+  - match: { device_id: bathroom_water_heater, capability: temperature }
+    maximum: 60
+    message: "nhiệt độ bình nóng lạnh được giới hạn ở 60 độ"
+
+  # Ban đêm: đèn phòng ngủ dịu, tivi nhỏ tiếng
+  - match: { room: bedroom, capability: brightness }
+    maximum: 40
+    quiet_hours_only: true
+    message: "ban đêm độ sáng phòng ngủ được giới hạn ở 40%"
+
+  - match: { capability: volume }
+    maximum: 25
+    quiet_hours_only: true
+    message: "ban đêm âm lượng được giới hạn ở 25%"
+
+forbid:
+  # Mở khóa cửa trong khung giờ đêm: không thực hiện bằng giọng nói
+  - match: { device_type: lock, capability: locked }
+    value: false
+    quiet_hours_only: true
+    message: "Vì lý do an toàn, mình không mở khóa cửa bằng giọng nói vào ban đêm."
+
+  # Không bật bình nóng lạnh lúc nửa đêm
+  - match: { device_id: bathroom_water_heater, capability: power }
+    value: "on"
+    quiet_hours_only: true
+    message: "Bình nóng lạnh không được bật trong khung giờ yên tĩnh."
+
+confirm:
+  # Mở khóa cửa ban ngày: vẫn phải xác nhận miệng
+  # (capability `locked` đã đánh dấu sensitive trong home.yaml, luật này nêu rõ câu hỏi)
+  - match: { device_type: lock, capability: locked }
+    value: false
+    prompt: "Bạn chắc chắn muốn mở khóa cửa chính chứ?"
+
+rate_limits:
+  commands_per_device_per_minute: 20
+  device_burst: 6
+  plans_per_session_per_minute: 30
+  session_burst: 10
