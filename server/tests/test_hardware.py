@@ -51,6 +51,13 @@ def test_update_status_updates_leds_and_sensors(client: TestClient) -> None:
     assert data["states"]["lr_angle"] == 30
     assert data["states"]["bed_angle"] == 0
 
+    # Verify returned room-based structure
+    assert "rooms" in data
+    assert data["rooms"]["living_room"]["main_light"] == 1
+    assert data["rooms"]["living_room"]["sofa_reading_light"] == 1
+    assert data["rooms"]["kitchen"]["main_light"] == 0
+    assert data["rooms"]["bedroom"]["main_light"] == 1
+
     # Verify device state endpoints reflect the hardware report
     lr_light = client.get("/api/v1/devices/living_room_light").json()
     assert lr_light["state"]["power"] == "on"

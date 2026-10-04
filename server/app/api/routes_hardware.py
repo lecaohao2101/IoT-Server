@@ -70,6 +70,41 @@ async def _build_pin_states(container: Container) -> dict[str, int]:
     }
 
 
+async def _build_room_states(container: Container) -> dict[str, dict[str, int]]:
+    """Helper to group device power states by room, matching high-level dashboard views."""
+    snapshot = await container.state.snapshot()
+
+    def _is_on(device_id: str) -> int:
+        return 1 if snapshot.value(device_id, "power") == "on" else 0
+
+    return {
+        "living_room": {
+            "main_light": _is_on("living_room_light"),
+            "sofa_reading_light": _is_on("living_room_sofa_light"),
+            "air_conditioner_1": _is_on("living_room_ac"),
+            "curtain": 1 if snapshot.value("living_room_curtain", "state") == "open" else 0,
+        },
+        "kitchen": {
+            "main_light": _is_on("kitchen_light"),
+        },
+        "bedroom": {
+            "main_light": _is_on("bedroom_light"),
+            "bedside_reading_light": _is_on("bedroom_side_light"),
+            "air_conditioner_2": _is_on("bedroom_ac"),
+            "curtain": 1 if snapshot.value("bedroom_curtain", "state") == "open" else 0,
+        },
+        "study": {
+            "light": _is_on("study_light"),
+        },
+        "balcony": {
+            "light": _is_on("balcony_light"),
+        },
+        "bathroom": {
+            "light": _is_on("bathroom_light"),
+        },
+    }
+
+
 @router.post(
     "/update-status",
     summary="Update hardware status from ESP32",
@@ -133,10 +168,12 @@ async def update_status(payload: HardwareStatusPayload, container: Container) ->
         updated_devices.append("bedroom_sensor")
 
     states = await _build_pin_states(container)
+    rooms = await _build_room_states(container)
     return {
         "success": True,
         "updated": updated_devices,
         "states": states,
+        "rooms": rooms,
     }
 
 
@@ -188,6 +225,7 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
     )
 
     states = await _build_pin_states(container)
+    rooms = await _build_room_states(container)
     return {
         "success": True,
         "transcript": user_text,
@@ -195,6 +233,7 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
         "plan": turn.plan.as_dict() if turn.plan else None,
         "dispatched": turn.report.delivered_count if turn.report else 0,
         "states": states,
+        "rooms": rooms,
     }
 
 
@@ -210,7 +249,9 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
 )
 async def poll_commands(container: Container) -> dict[str, Any]:
     states = await _build_pin_states(container)
+    rooms = await _build_room_states(container)
     return {
         "success": True,
         "states": states,
+        "rooms": rooms,
     }

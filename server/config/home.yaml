@@ -508,11 +508,11 @@ scenes:
   - id: reading
     name: "Chế độ đọc sách"
     aliases: ["đọc sách", "doc sach", "muốn đọc sách", "xem sách", "đọc truyện", "học bài"]
-    description: "Bật đèn phòng ngủ mức 80% ánh sáng ấm 4000K để đọc sách"
+    description: "Bật đèn bàn học và đèn phòng ngủ để đọc sách"
     actions:
+      - { device_id: study_light, capability: power, value: "on" }
       - { device_id: bedroom_light, capability: power, value: "on" }
       - { device_id: bedroom_light, capability: brightness, value: "80" }
-      - { device_id: bedroom_light, capability: color_temp, value: "4000" }
 
   - id: relax
     name: "Chế độ thư giãn"
