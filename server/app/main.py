@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api import routes_chat, routes_devices, routes_system, ws_voice
+from app.api import routes_chat, routes_devices, routes_hardware, routes_system, ws_voice
 from app.config import Settings, get_settings
 from app.container import AppContainer
 from app.core.errors import AppError
@@ -134,6 +134,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_system.router)
     app.include_router(routes_devices.router)
     app.include_router(routes_chat.router)
+    app.include_router(routes_hardware.router)
     app.include_router(ws_voice.router)
     return app
 

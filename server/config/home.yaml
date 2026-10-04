@@ -58,6 +58,25 @@ devices:
         unit: "K"
         default: 4000
 
+  - id: living_room_sofa_light
+    name: "Đèn sofa phòng khách"
+    type: light
+    room: living_room
+    aliases: ["đèn sofa", "đèn ghế sofa", "đèn sofa phòng khách", "đèn phụ phòng khách"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+        description: "Bật / tắt đèn sofa"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 80
+
   - id: living_room_ac
     name: "Điều hòa phòng khách"
     type: air_conditioner
@@ -83,6 +102,14 @@ devices:
         kind: enum
         values: ["auto", "low", "medium", "high"]
         default: "auto"
+      vane_angle:
+        kind: number
+        minimum: 0
+        maximum: 90
+        step: 1
+        unit: "°"
+        default: 0
+        description: "Góc mở cánh gió servo (0 = đóng, 30 = mở)"
 
   - id: living_room_curtain
     name: "Rèm phòng khách"
@@ -141,6 +168,14 @@ devices:
         unit: "%"
         read_only: true
         default: 65
+      sound_level:
+        kind: number
+        minimum: 0
+        maximum: 100
+        unit: "level"
+        read_only: true
+        default: 0
+        description: "Mức độ âm thanh đo từ mic INMP441"
 
   # --------------------------------------------------------------- phòng bếp
   - id: kitchen_light
@@ -215,6 +250,42 @@ devices:
         unit: "%"
         default: 60
 
+  - id: bedroom_side_light
+    name: "Đèn đầu giường"
+    type: light
+    room: bedroom
+    aliases: ["đèn đầu giường", "đèn ngủ nhỏ", "đèn cạnh giường", "đèn tab đầu giường"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 50
+
+  - id: study_light
+    name: "Đèn bàn học"
+    type: light
+    room: bedroom
+    aliases: ["đèn học", "đèn bàn", "đèn làm việc", "đèn bàn học"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 80
+
   - id: bedroom_ac
     name: "Điều hòa phòng ngủ"
     type: air_conditioner
@@ -240,6 +311,14 @@ devices:
         kind: enum
         values: ["auto", "low", "medium", "high"]
         default: "auto"
+      vane_angle:
+        kind: number
+        minimum: 0
+        maximum: 90
+        step: 1
+        unit: "°"
+        default: 0
+        description: "Góc mở cánh gió servo (0 = đóng, 30 = mở)"
 
   - id: bedroom_curtain
     name: "Rèm phòng ngủ"
@@ -279,13 +358,21 @@ devices:
         unit: "%"
         read_only: true
         default: 60
+      distance_cm:
+        kind: number
+        minimum: 0
+        maximum: 400
+        unit: "cm"
+        read_only: true
+        default: 100
+        description: "Khoảng cách đo bằng cảm biến siêu âm"
 
   # -------------------------------------------------------------- phòng tắm
   - id: bathroom_light
     name: "Đèn phòng tắm"
     type: light
     room: bathroom
-    aliases: ["đèn phòng tắm", "đèn nhà tắm"]
+    aliases: ["đèn phòng tắm", "đèn nhà tắm", "đèn toilet", "đèn wc"]
     capabilities:
       power:
         kind: enum
@@ -318,6 +405,24 @@ devices:
         default: 45
 
   # --------------------------------------------------------------- ban công
+  - id: balcony_light
+    name: "Đèn ban công"
+    type: light
+    room: balcony
+    aliases: ["đèn ban công", "đèn ngoài ban công"]
+    capabilities:
+      power:
+        kind: enum
+        values: ["on", "off"]
+        default: "off"
+      brightness:
+        kind: number
+        minimum: 0
+        maximum: 100
+        step: 1
+        unit: "%"
+        default: 80
+
   - id: balcony_sensor
     name: "Cảm biến ban công"
     type: sensor
