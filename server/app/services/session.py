@@ -48,6 +48,7 @@ class VoiceSession(TurnSink):
         principal: Principal,
         session_id: str | None = None,
         room: str | None = None,
+        audio_hub: Any = None,
     ) -> None:
         self._ws = websocket
         self._orchestrator = orchestrator
@@ -55,6 +56,7 @@ class VoiceSession(TurnSink):
         self._s = settings
         self._bus = bus
         self._principal = principal
+        self._audio_hub = audio_hub
 
         self.session_id = session_id or new_id("sess")
         self.room = room
@@ -94,6 +96,8 @@ class VoiceSession(TurnSink):
     async def audio_chunk(self, payload: bytes) -> None:
         if payload and not self.cancelled:
             await self._send_bytes(payload)
+            if self._audio_hub:
+                await self._audio_hub.broadcast_chunk(payload, src_rate=self._fmt.sample_rate)
 
     async def audio_end(self) -> None:
         await self._send(proto.tts_end())

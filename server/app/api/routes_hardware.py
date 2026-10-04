@@ -216,10 +216,15 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
             "error": "stt_empty",
         }
 
+    from app.services.audio_hub import HubTurnSink
+
+    sink = HubTurnSink(container.audio_hub)
+
     # Execute intent through the conversation orchestrator
     turn = await container.orchestrator.run_turn(
         session_id="esp32_hardware",
         user_text=user_text,
+        sink=sink,
         speak=True,
         encoding=AudioEncoding.PCM16,
     )

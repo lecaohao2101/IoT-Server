@@ -27,6 +27,7 @@ from app.mqtt.bridge import DeviceBridge
 from app.mqtt.client import MqttTransport, create_transport
 from app.safety.rules import SafetyPolicy, load_safety_policy
 from app.safety.validator import CommandValidator
+from app.services.audio_hub import AudioBroadcastHub
 from app.services.conversation import ConversationManager
 from app.services.device_state import DeviceStateManager
 from app.services.orchestrator import Orchestrator
@@ -52,6 +53,7 @@ class AppContainer:
     llm: LanguageModel
     orchestrator: Orchestrator
     started_at: float
+    audio_hub: AudioBroadcastHub
 
     # ------------------------------------------------------------- lifecycle
     @classmethod
@@ -133,6 +135,7 @@ class AppContainer:
             llm=llm,
             orchestrator=orchestrator,
             started_at=time.monotonic(),
+            audio_hub=AudioBroadcastHub(),
         )
 
     async def aclose(self) -> None:

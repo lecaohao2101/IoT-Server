@@ -117,6 +117,39 @@ def to_mono(pcm: bytes, channels: int) -> bytes:
     return _as_bytes(out)
 
 
+def mono_to_stereo(pcm: bytes) -> bytes:
+    """Duplicate mono PCM16 channel into interleaved 2-channel stereo."""
+    if not pcm:
+        return b""
+    src = _as_samples(pcm)
+    out = array.array("h", bytes(4 * len(src)))
+    for i, s in enumerate(src):
+        out[2 * i] = s
+        out[2 * i + 1] = s
+    return _as_bytes(out)
+
+
+def convert_pcm(
+    pcm: bytes,
+    src_rate: int = 16000,
+    dst_rate: int = 44100,
+    src_channels: int = 1,
+    dst_channels: int = 2,
+) -> bytes:
+    """Convenience helper to resample and change channel count for PCM16 audio."""
+    if not pcm:
+        return b""
+    out = pcm
+    if src_channels > 1 and dst_channels == 1:
+        out = to_mono(out, src_channels)
+    if src_rate != dst_rate:
+        out = resample(out, src_rate, dst_rate, channels=1 if src_channels == 1 else dst_channels)
+    if src_channels == 1 and dst_channels == 2:
+        out = mono_to_stereo(out)
+    return out
+
+
+
 # ----------------------------------------------------------------- container
 
 

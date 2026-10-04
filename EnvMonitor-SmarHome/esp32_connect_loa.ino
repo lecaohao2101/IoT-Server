@@ -5,30 +5,46 @@
 #include "BluetoothA2DPSource.h"
 #include <math.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
 // ============================================================================
-// 1. CẤU HÌNH & KHAI BÁO BIẾN TOÀN CỤC (PHẢI ĐẶT Ở ĐẦU)
+// 1. CẤU HÌNH & KHAI BÁO BIẾN TOÀN CỤC
 // ============================================================================
 #define SAMPLE_RATE 44100
 #define FREQUENCY 440
 
-// --- ĐIỀN IP MÁY TÍNH CHẠY PYTHON FASTAPI TẠI ĐÂY ---
-const char* FASTAPI_IP = "192.168.1.12"; 
-const int FASTAPI_PORT = 8000;
+// --- CẤU HÌNH KẾT NỐI SERVER FASTAPI / CLOUD ---
+// Đặt USE_CLOUD = true để kết nối thẳng tới server đã deploy trên Fly.io
+// Đặt USE_CLOUD = false nếu muốn kết nối tới IP máy tính cục bộ trong mạng LAN
+const bool USE_CLOUD = true;
+
+// Server Cloud (Fly.io)
+const char* CLOUD_HOST = "smart-apartment-server.fly.dev";
+const int CLOUD_PORT = 443;
+
+// Server Local (Máy tính cá nhân)
+const char* LOCAL_HOST = "192.168.1.12"; 
+const int LOCAL_PORT = 8000;
 
 BluetoothA2DPSource a2dp_source;
 WebServer server(80);
-WiFiClient audioClient;
+
+WiFiClient localAudioClient;
+WiFiClientSecure cloudAudioClient;
 
 static float m_time = 0.0;
 bool is_bt_connected = false;
+bool is_stream_connected = false;
 bool is_playing_test_sound = false;
+String current_test_speech = "";
 String current_youtube_url = "";
 String connected_speaker_name = "Đang tìm kiếm...";
 String connected_speaker_mac = "";
 
-// Cấu hình Ring Buffer cho luồng Audio
-const int AUDIO_BUFFER_SIZE = 8192;
+unsigned long lastStreamReconnect = 0;
+
+// Cấu hình Ring Buffer cho luồng Audio (8KB hoặc 16KB tuỳ RAM)
+const int AUDIO_BUFFER_SIZE = 16384;
 uint8_t audioBuffer[AUDIO_BUFFER_SIZE];
 int head = 0, tail = 0;
 
@@ -36,8 +52,15 @@ int availableBuffer() {
   return (tail >= head) ? (tail - head) : (AUDIO_BUFFER_SIZE - head + tail);
 }
 
+Client& getAudioClient() {
+  if (USE_CLOUD) {
+    return cloudAudioClient;
+  }
+  return localAudioClient;
+}
+
 // ============================================================================
-// 2. CALLBACK CẤP DỮ LIỆU ÂM THANH (DUY NHẤT)
+// 2. CALLBACK CẤP DỮ LIỆU ÂM THANH CHO LOA BLUETOOTH A2DP
 // ============================================================================
 int32_t get_sound_data(uint8_t *data, int32_t len) {
   if (!is_bt_connected) {
@@ -45,7 +68,7 @@ int32_t get_sound_data(uint8_t *data, int32_t len) {
     return len;
   }
 
-  // Nếu đang bật âm thử nghiệm (440Hz)
+  // Nếu đang bật âm thử nghiệm (440Hz sin wave)
   if (is_playing_test_sound) {
     int16_t *pcm = (int16_t*)data;
     int sample_count = len / 2;
@@ -59,14 +82,14 @@ int32_t get_sound_data(uint8_t *data, int32_t len) {
     return len;
   }
 
-  // Đọc dữ liệu stream từ Python Backend đưa ra loa
+  // Đọc dữ liệu stream từ Backend (Google TTS 44.1kHz Stereo) đưa ra loa
   int bytesRead = 0;
   while (bytesRead < len && availableBuffer() > 0) {
     data[bytesRead++] = audioBuffer[head];
     head = (head + 1) % AUDIO_BUFFER_SIZE;
   }
 
-  // Nếu buffer bị trống, chèn yên lặng để tránh giật tiếng
+  // Nếu buffer tạm trống, chèn yên lặng để tránh nổ bụp / giật tiếng
   if (bytesRead < len) {
     memset(data + bytesRead, 0, len - bytesRead);
   }
@@ -91,7 +114,7 @@ bool ssid_callback(const char *ssid, esp_bd_addr_t address, int rssi) {
     connected_speaker_mac = String(macStr);
 
     Serial.println("----------------------------------------------");
-    Serial.printf("===> CHỌN LOA: '%s' (%s)\n", ssid, macStr);
+    Serial.printf("===> CHỌN LOA BLUETOOTH: '%s' (%s)\n", ssid, macStr);
     Serial.println("===> Đang tiến hành ghép nối A2DP...");
     Serial.println("----------------------------------------------");
 
@@ -103,7 +126,7 @@ bool ssid_callback(const char *ssid, esp_bd_addr_t address, int rssi) {
 void connection_state_changed(esp_a2d_connection_state_t state, void *ptr) {
   if (state == ESP_A2D_CONNECTION_STATE_CONNECTED) {
     is_bt_connected = true;
-    Serial.println("\n[A2DP] ===> KẾT NỐI LOA THÀNH CÔNG!");
+    Serial.println("\n[A2DP] ===> KẾT NỐI LOA BLUETOOTH THÀNH CÔNG!");
   } else if (state == ESP_A2D_CONNECTION_STATE_DISCONNECTED) {
     is_bt_connected = false;
     connected_speaker_name = "Đang tìm kiếm...";
@@ -112,107 +135,146 @@ void connection_state_changed(esp_a2d_connection_state_t state, void *ptr) {
 }
 
 // ============================================================================
-// 4. GIAO DIỆN WEB VÀ XỬ LÝ (HTML/JS)
+// 4. KẾT NỐI LUỒNG ÂM THANH PERSISTENT VỚI SERVER FASTAPI
+// ============================================================================
+void connectAudioStream() {
+  Client& client = getAudioClient();
+  if (client.connected()) return;
+
+  const char* host = USE_CLOUD ? CLOUD_HOST : LOCAL_HOST;
+  int port = USE_CLOUD ? CLOUD_PORT : LOCAL_PORT;
+
+  Serial.printf("[STREAM] Đang kết nối luồng Audio TTS tới %s:%d...\n", host, port);
+
+  if (USE_CLOUD) {
+    cloudAudioClient.setInsecure();
+  }
+
+  if (client.connect(host, port)) {
+    // Yêu cầu luồng âm thanh 44.1kHz Stereo (tương thích trực tiếp chuẩn A2DP Bluetooth)
+    String request = String("GET /api/audio/stream?rate=44100&channels=2 HTTP/1.1\r\n") +
+                     "Host: " + String(host) + "\r\n" +
+                     "User-Agent: ESP32-A2DP-Speaker\r\n" +
+                     "Accept: application/octet-stream\r\n" +
+                     "Connection: keep-alive\r\n\r\n";
+    client.print(request);
+
+    // Bỏ qua HTTP Response Headers
+    unsigned long timeout = millis();
+    while (client.connected() && millis() - timeout < 4000) {
+      if (client.available()) {
+        String line = client.readStringUntil('\n');
+        if (line == "\r" || line == "") {
+          is_stream_connected = true;
+          Serial.println("[STREAM] ===> KẾT NỐI LUỒNG AUDIO SERVER THÀNH CÔNG! Sẵn sàng phát tiếng Trợ lý AI.");
+          break;
+        }
+      }
+    }
+  } else {
+    is_stream_connected = false;
+    Serial.println("[STREAM] Kết nối Server thất bại, sẽ thử lại sau 5s...");
+  }
+}
+
+// ============================================================================
+// 5. GIAO DIỆN WEB QUẢN TRỊ & THỬ NGHIỆM
 // ============================================================================
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
   html += "<title>ESP32 Smart Audio Hub</title>";
   html += "<style>";
-  html += "body { font-family: Arial, sans-serif; text-align: center; background: #121212; color: #fff; padding: 20px; }";
-  html += ".card { background: #1e1e1e; padding: 25px; border-radius: 12px; max-width: 420px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }";
-  html += "input[type=text] { width: 90%; padding: 12px; margin: 12px 0; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; }";
-  html += "button { background: #ff0000; color: white; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; margin: 6px; }";
-  html += "button.test { background: #008cba; }";
-  html += ".status-box { background: #2a2a2a; padding: 12px; border-radius: 8px; margin: 15px 0; font-size: 14px; text-align: left; }";
+  html += "body { font-family: Arial, sans-serif; text-align: center; background: #0f172a; color: #fff; padding: 20px; }";
+  html += ".card { background: #1e293b; padding: 25px; border-radius: 12px; max-width: 460px; margin: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }";
+  html += "input[type=text] { width: 90%; padding: 12px; margin: 10px 0; border-radius: 6px; border: 1px solid #334155; background: #0f172a; color: #fff; }";
+  html += "button { background: #38bdf8; color: #0f172a; border: none; padding: 12px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; margin: 6px; }";
+  html += "button.test { background: #008cba; color: white; }";
+  html += "button.tts { background: #22c55e; color: white; }";
+  html += ".status-box { background: #0f172a; padding: 14px; border-radius: 8px; margin: 15px 0; font-size: 14px; text-align: left; border: 1px solid #334155; }";
   html += "</style></head><body>";
   
   html += "<div class='card'>";
-  html += "<h2>🎵 ESP32 Audio Controller</h2>";
+  html += "<h2>🔊 ESP32 Smart Audio Hub</h2>";
+  html += "<p style='color:#94a3b8; font-size:13px;'>Phát giọng nói Google TTS & Trợ lý ảo AI ra Loa Bluetooth</p>";
   
   html += "<div class='status-box'>";
-  html += "<b>🔊 Loa Bluetooth:</b> " + connected_speaker_name + "<br>";
+  html += "<b>📡 Loa Bluetooth:</b> " + connected_speaker_name + "<br>";
   if (connected_speaker_mac.length() > 0) {
     html += "<b>📍 MAC:</b> " + connected_speaker_mac + "<br>";
   }
-  html += "<b>Status:</b> " + String(is_bt_connected ? "<span style='color:#4caf50'>Đã kết nối</span>" : "<span style='color:#ff9800'>Đang quét tìm...</span>");
+  html += "<b>Bluetooth:</b> " + String(is_bt_connected ? "<span style='color:#22c55e'>Đã kết nối</span>" : "<span style='color:#f59e0b'>Đang quét tìm...</span>") + "<br>";
+  html += "<b>Server Stream:</b> " + String(is_stream_connected ? "<span style='color:#22c55e'>Đang lắng nghe</span>" : "<span style='color:#ef4444'>Chưa kết nối</span>") + "<br>";
+  html += "<b>Host:</b> " + String(USE_CLOUD ? CLOUD_HOST : LOCAL_HOST) + "<br>";
   html += "</div>";
 
-  html += "<form action='/play' method='POST'>";
-  html += "<input type='text' name='yt_url' placeholder='Dán link YouTube vào đây...' value='" + current_youtube_url + "' required><br>";
-  html += "<button type='submit'>▶ Phát Nhạc YouTube</button>";
+  // Thử nghiệm phát câu nói TTS trực tiếp
+  html += "<form action='/say' method='POST'>";
+  html += "<input type='text' name='text' placeholder='Nhập câu để AI nói thử...' value='Xin chào, tôi là trợ lý nhà thông minh.' required><br>";
+  html += "<button type='submit' class='tts'>🗣️ Thử Giọng Nói AI (TTS)</button>";
   html += "</form>";
 
-  html += "<hr style='border-color: #333; margin: 20px 0;'>";
-  html += "<a href='/test_sound'><button class='test'>" + String(is_playing_test_sound ? "⏹ Tắt Âm Thử Nghiệm" : "🔔 Phát Âm Thử Nghiệm (440Hz)") + "</button></a><br>";
-  html += "<a href='/reset_wifi'><button style='background:#555;'>⚙ Cấu hình lại Wi-Fi</button></a>";
+  html += "<hr style='border-color: #334155; margin: 20px 0;'>";
+
+  html += "<form action='/play' method='POST'>";
+  html += "<input type='text' name='yt_url' placeholder='Dán link YouTube (nếu có)...' value='" + current_youtube_url + "'><br>";
+  html += "<button type='submit'>▶ Phát Nhạc</button>";
+  html += "</form>";
+
+  html += "<hr style='border-color: #334155; margin: 20px 0;'>";
+  html += "<a href='/test_sound'><button class='test'>" + String(is_playing_test_sound ? "⏹ Tắt Âm Thử (440Hz)" : "🔔 Phát Âm Thử (440Hz)") + "</button></a> ";
+  html += "<a href='/reset_wifi'><button style='background:#64748b; color:white;'>⚙ Wi-Fi</button></a>";
   
-  if (current_youtube_url.length() > 0) {
-    html += "<p style='color:#4caf50; font-size:13px; margin-top:15px;'>Đang chọn bài: " + current_youtube_url + "</p>";
-  }
   html += "</div></body></html>";
 
   server.send(200, "text/html", html);
 }
 
+void handleSay() {
+  if (server.hasArg("text")) {
+    String textToSay = server.arg("text");
+    Serial.printf("\n[WEB UI] Yêu cầu phát TTS: '%s'\n", textToSay.c_str());
+
+    HTTPClient http;
+    Client& baseClient = getAudioClient();
+    String serverUrl = (USE_CLOUD ? "https://" + String(CLOUD_HOST) : "http://" + String(LOCAL_HOST) + ":" + String(LOCAL_PORT)) + "/api/audio/play";
+
+    if (USE_CLOUD) {
+      WiFiClientSecure secureClient;
+      secureClient.setInsecure();
+      http.begin(secureClient, serverUrl);
+    } else {
+      http.begin(serverUrl);
+    }
+
+    http.addHeader("Content-Type", "application/json");
+    String jsonPayload = "{\"text\":\"" + textToSay + "\"}";
+    int code = http.POST(jsonPayload);
+    Serial.printf("[HTTP /api/audio/play] Mã phản hồi: %d\n", code);
+    http.end();
+  }
+
+  server.sendHeader("Location", "/");
+  server.send(303);
+}
+
 void handlePlay() {
   if (server.hasArg("yt_url")) {
     current_youtube_url = server.arg("yt_url");
-    Serial.printf("\n[WEB UI] Nhận URL YouTube mới: %s\n", current_youtube_url.c_str());
-
     is_playing_test_sound = false;
-
-    // Sử dụng IP đã khai báo ở đầu file
-    HTTPClient http;
-    String serverUrl = "http://" + String(FASTAPI_IP) + ":" + String(FASTAPI_PORT) + "/api/audio/play";
-    
-    http.begin(serverUrl);
-    http.addHeader("Content-Type", "application/json");
-    
-    String jsonPayload = "{\"url\":\"" + current_youtube_url + "\"}";
-    int httpResponseCode = http.POST(jsonPayload);
-
-    if (httpResponseCode > 0) {
-      Serial.printf("[HTTP] Gửi URL sang Backend thành công, mã phản hồi: %d\n", httpResponseCode);
-      
-      // Mở kết nối đọc Stream PCM từ FastAPI
-      // Mở kết nối đọc Stream PCM từ FastAPI
-      if (audioClient.connect(FASTAPI_IP, FASTAPI_PORT)) {
-        // Dùng HTTP/1.0 để tắt tính năng Transfer-Encoding: chunked
-        audioClient.print(String("GET /api/audio/stream HTTP/1.0\r\n") +
-                          "Host: " + String(FASTAPI_IP) + "\r\n" +
-                          "Connection: close\r\n\r\n");
-        
-        // Vòng lặp đọc và vứt bỏ phần Header HTTP, chỉ giữ lại phần nhạc
-        unsigned long timeout = millis();
-        while (audioClient.connected() && millis() - timeout < 3000) {
-          if (audioClient.available()) {
-            String line = audioClient.readStringUntil('\n');
-            if (line == "\r" || line == "") {
-              Serial.println("[STREAM] Đã bỏ qua Header, bắt đầu nhận Audio PCM!");
-              break; 
-            }
-          }
-        }
-      }
-    } else {
-      Serial.printf("[HTTP] Lỗi gửi tới Backend: %s\n", http.errorToString(httpResponseCode).c_str());
-    }
-    http.end();
   }
-  
   server.sendHeader("Location", "/");
-  server.send(333);
+  server.send(303);
 }
 
 void handleTestSound() {
   is_playing_test_sound = !is_playing_test_sound;
   server.sendHeader("Location", "/");
-  server.send(333);
+  server.send(303);
 }
 
 void handleResetWifi() {
-  server.send(200, "text/html", "<h3>Đã xóa cài đặt Wi-Fi! ESP32 đang khởi động lại...</h3>");
+  server.send(200, "text/html", "<h3>Đã xóa cấu hình Wi-Fi! ESP32 đang khởi động lại...</h3>");
   delay(1000);
   WiFiManager wm;
   wm.resetSettings();
@@ -220,7 +282,7 @@ void handleResetWifi() {
 }
 
 // ============================================================================
-// 5. KHỞI TẠO HỆ THỐNG VÀ LOOP
+// 6. KHỞI TẠO HỆ THỐNG VÀ LOOP
 // ============================================================================
 void setup() {
   Serial.begin(115200);
@@ -230,7 +292,7 @@ void setup() {
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
 
-  Serial.println("[WIFI] Kiểm tra Wi-Fi...");
+  Serial.println("[WIFI] Đang kiểm tra Wi-Fi...");
   if (!wm.autoConnect("ESP32-Audio-Setup")) {
     Serial.println("[WIFI] Kết nối thất bại. Khởi động lại...");
     ESP.restart();
@@ -245,12 +307,14 @@ void setup() {
   }
 
   server.on("/", handleRoot);
+  server.on("/say", HTTP_POST, handleSay);
   server.on("/play", HTTP_POST, handlePlay);
   server.on("/test_sound", handleTestSound);
   server.on("/reset_wifi", handleResetWifi);
   server.begin();
-  Serial.println("[WEB] Web Server đã sẵn sàng.");
+  Serial.println("[WEB] Web Server quản trị đã sẵn sàng.");
 
+  // Cấu hình Bluetooth A2DP Source tới Loa ngoài
   a2dp_source.set_ssid_callback(ssid_callback);                     
   a2dp_source.set_on_connection_state_changed(connection_state_changed); 
   a2dp_source.set_data_callback(get_sound_data);                    
@@ -261,13 +325,25 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient(); 
+  server.handleClient();
 
-  // Đọc stream từ Backend đưa vào bộ đệm âm thanh
-  while (audioClient.connected() && audioClient.available()) {
+  // Tự động kết nối và duy trì luồng âm thanh từ Server
+  Client& client = getAudioClient();
+  unsigned long now = millis();
+
+  if (WiFi.status() == WL_CONNECTED && !client.connected()) {
+    is_stream_connected = false;
+    if (now - lastStreamReconnect > 5000) {
+      lastStreamReconnect = now;
+      connectAudioStream();
+    }
+  }
+
+  // Đọc dữ liệu audio stream từ Server đưa vào Ring Buffer để phát ra Loa
+  while (client.connected() && client.available()) {
     int nextTail = (tail + 1) % AUDIO_BUFFER_SIZE;
     if (nextTail != head) { 
-      audioBuffer[tail] = audioClient.read();
+      audioBuffer[tail] = client.read();
       tail = nextTail;
     } else {
       break; 

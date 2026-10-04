@@ -155,9 +155,9 @@ void handleButtons() {
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     
-    // Thu âm 5 giây khi bấm nút Ban Công
-    // Serial.println("[Click] Kích hoạt thu âm Ban Công (5 giây)...");
-    // recordAndSendAudio(5);
+    // Thu âm 5 giây khi bấm nút Ban Công và gửi lên AI Server
+    Serial.println("[Click] Kích hoạt thu âm Ban Công (5 giây) gửi AI...");
+    recordAndSendAudio(5);
     
     delay(50);
   }
