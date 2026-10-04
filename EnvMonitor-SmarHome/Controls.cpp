@@ -2,6 +2,7 @@
 #include "Config.h"
 #include "AudioHandler.h"
 #include "StatusManager.h"
+#include "MqttHandler.h"
 #include <ESP32Servo.h>
 
 static Servo servo_lr;
@@ -84,6 +85,11 @@ void handleButtons() {
                   "\"servos\":{\"lr_angle\":" + String(angle) + "}}";
     sendPartialStatus(json);
 
+    // Bắn trạng thái tức thời lên MQTT broker
+    mqttPublishState("living_room", "living_room_light", state_lr ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+    mqttPublishState("living_room", "living_room_sofa_light", state_lr ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+    mqttPublishState("living_room", "living_room_ac", state_lr ? "{\"power\":\"on\",\"vane_angle\":30}" : "{\"power\":\"off\",\"vane_angle\":0}");
+
     digitalWrite(PIN_BUZZER, HIGH); 
     delay(30); 
     digitalWrite(PIN_BUZZER, LOW);
@@ -100,6 +106,9 @@ void handleButtons() {
     String json = "{\"buttons\":{\"kitchen\":" + boolStr + "}," +
                   "\"leds\":{\"kit_main\":" + boolStr + "}}";
     sendPartialStatus(json);
+
+    // Bắn trạng thái tức thời lên MQTT broker
+    mqttPublishState("kitchen", "kitchen_light", state_kitchen ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     Serial.printf("[Click] Đèn Nhà Bếp: %s\n", state_kitchen ? "BAT" : "TAT");
@@ -121,6 +130,11 @@ void handleButtons() {
                   "\"servos\":{\"bed_angle\":" + String(angle) + "}}";
     sendPartialStatus(json);
 
+    // Bắn trạng thái tức thời lên MQTT broker
+    mqttPublishState("bedroom", "bedroom_light", state_bed ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+    mqttPublishState("bedroom", "bedroom_side_light", state_bed ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+    mqttPublishState("bedroom", "bedroom_ac", state_bed ? "{\"power\":\"on\",\"vane_angle\":30}" : "{\"power\":\"off\",\"vane_angle\":0}");
+
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     Serial.printf("[Click] Điều hòa Phòng Ngủ: %s\n", state_bed ? "BAT" : "TAT");
     delay(50);
@@ -135,6 +149,9 @@ void handleButtons() {
     String json = "{\"buttons\":{\"balcony\":" + boolStr + "}," +
                   "\"leds\":{\"balcony\":" + boolStr + "}}";
     sendPartialStatus(json);
+
+    // Bắn trạng thái tức thời lên MQTT broker
+    mqttPublishState("balcony", "balcony_light", state_balcony ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     

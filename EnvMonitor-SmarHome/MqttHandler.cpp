@@ -33,27 +33,50 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     val = p.substring(angleIdx + 13).toInt();
   }
 
-  // Khớp topic thiết bị và kích hoạt phần cứng thực tế
+  const char* pState = power ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}";
+
+  // Khớp topic thiết bị, kích hoạt phần cứng và phản hồi trạng thái ngược lên MQTT
   if (t.indexOf("living_room_light") != -1) {
     setDeviceActuator("living_room_light", power);
+    mqttPublishState("living_room", "living_room_light", pState);
   } else if (t.indexOf("living_room_sofa_light") != -1) {
     setDeviceActuator("living_room_sofa_light", power);
+    mqttPublishState("living_room", "living_room_sofa_light", pState);
   } else if (t.indexOf("kitchen_light") != -1) {
     setDeviceActuator("kitchen_light", power);
+    mqttPublishState("kitchen", "kitchen_light", pState);
   } else if (t.indexOf("bedroom_light") != -1) {
     setDeviceActuator("bedroom_light", power);
+    mqttPublishState("bedroom", "bedroom_light", pState);
   } else if (t.indexOf("bedroom_side_light") != -1) {
     setDeviceActuator("bedroom_side_light", power);
+    mqttPublishState("bedroom", "bedroom_side_light", pState);
   } else if (t.indexOf("study_light") != -1) {
     setDeviceActuator("study_light", power);
+    mqttPublishState("bedroom", "study_light", pState);
   } else if (t.indexOf("balcony_light") != -1) {
     setDeviceActuator("balcony_light", power);
+    mqttPublishState("balcony", "balcony_light", pState);
   } else if (t.indexOf("bathroom_light") != -1) {
     setDeviceActuator("bathroom_light", power);
+    mqttPublishState("bathroom", "bathroom_light", pState);
   } else if (t.indexOf("living_room_ac") != -1) {
     setDeviceActuator("living_room_ac", power, val);
+    int angle = (val >= 0) ? val : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
+    String acJson = "{\"power\":\"" + String(power ? "on" : "off") + "\",\"vane_angle\":" + String(angle) + "}";
+    mqttPublishState("living_room", "living_room_ac", acJson.c_str());
   } else if (t.indexOf("bedroom_ac") != -1) {
     setDeviceActuator("bedroom_ac", power, val);
+    int angle = (val >= 0) ? val : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
+    String acJson = "{\"power\":\"" + String(power ? "on" : "off") + "\",\"vane_angle\":" + String(angle) + "}";
+    mqttPublishState("bedroom", "bedroom_ac", acJson.c_str());
+  }
+}
+
+void mqttPublishState(const char* room, const char* deviceId, const char* jsonPayload) {
+  if (mqttClient.connected()) {
+    String topic = "home/" + String(room) + "/" + String(deviceId) + "/state";
+    mqttClient.publish(topic.c_str(), jsonPayload, true); // true = Retained message
   }
 }
 
@@ -73,12 +96,15 @@ void loopMQTT() {
     if (now - lastMqttRetry > 5000) {
       lastMqttRetry = now;
       Serial.print("[MQTT] Đang kết nối HiveMQ Cloud (TLS 8883)...");
-      if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS)) {
+      const char* willTopic = "home/esp32/availability";
+      const char* willMsg = "offline";
+      // Kết nối với Last Will and Testament (LWT)
+      if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS, willTopic, 1, true, willMsg)) {
         Serial.println(" THÀNH CÔNG!");
         // Lắng nghe lệnh điều khiển từ server & mobile app
         mqttClient.subscribe("home/+/+/set");
         mqttClient.subscribe("home/+/+/set/+");
-        // Báo trạng thái online lên broker
+        // Báo trạng thái online lên broker (Retained)
         mqttClient.publish("home/esp32/availability", "online", true);
       } else {
         Serial.printf(" Thất bại, rc=%d (sẽ thử lại sau 5s)\n", mqttClient.state());
@@ -105,5 +131,7 @@ void loopMQTT() {}
 bool isMqttConnected() {
   return false;
 }
+
+void mqttPublishState(const char* room, const char* deviceId, const char* jsonPayload) {}
 
 #endif

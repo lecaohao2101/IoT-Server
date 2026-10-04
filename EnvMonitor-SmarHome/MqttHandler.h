@@ -12,4 +12,7 @@ void loopMQTT();
 // Kiểm tra trạng thái kết nối MQTT
 bool isMqttConnected();
 
+// Publish trạng thái thiết bị lên MQTT (Retained message)
+void mqttPublishState(const char* room, const char* deviceId, const char* jsonPayload);
+
 #endif
