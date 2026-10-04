@@ -93,7 +93,7 @@ void handleButtons() {
     digitalWrite(PIN_BUZZER, HIGH); 
     delay(30); 
     digitalWrite(PIN_BUZZER, LOW);
-    Serial.printf("[Click] Điều hòa Phòng Khách: %s\n", state_lr ? "BAT" : "TAT");
+    Serial.printf("[BTN-CLICK] Nút Phòng Khách -> Đèn: %s | Cánh gió AC: %d°\n", state_lr ? "BAT" : "TAT", angle);
     delay(50);
   }
   lastBtnState_lr = current_lr;
@@ -111,7 +111,7 @@ void handleButtons() {
     mqttPublishState("kitchen", "kitchen_light", state_kitchen ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-    Serial.printf("[Click] Đèn Nhà Bếp: %s\n", state_kitchen ? "BAT" : "TAT");
+    Serial.printf("[BTN-CLICK] Nút Nhà Bếp -> Đèn: %s\n", state_kitchen ? "BAT" : "TAT");
     delay(50);
   }
   lastBtnState_kitchen = current_kitchen;
@@ -136,7 +136,7 @@ void handleButtons() {
     mqttPublishState("bedroom", "bedroom_ac", state_bed ? "{\"power\":\"on\",\"vane_angle\":30}" : "{\"power\":\"off\",\"vane_angle\":0}");
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-    Serial.printf("[Click] Điều hòa Phòng Ngủ: %s\n", state_bed ? "BAT" : "TAT");
+    Serial.printf("[BTN-CLICK] Nút Phòng Ngủ -> Đèn: %s | Cánh gió AC: %d°\n", state_bed ? "BAT" : "TAT", angle);
     delay(50);
   }
   lastBtnState_bed = current_bed;
@@ -154,6 +154,7 @@ void handleButtons() {
     mqttPublishState("balcony", "balcony_light", state_balcony ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
+    Serial.printf("[BTN-CLICK] Nút Ban Công -> Đèn: %s\n", state_balcony ? "BAT" : "TAT");
     
     // Thu âm 5 giây khi bấm nút Ban Công và gửi lên AI Server
     Serial.println("[Click] Kích hoạt thu âm Ban Công (5 giây) gửi AI...");
@@ -165,6 +166,7 @@ void handleButtons() {
 }
 
 void setDeviceActuator(const String& deviceId, bool power, int value) {
+  Serial.printf("[ACTUATOR] %s -> %s (val=%d)\n", deviceId.c_str(), power ? "ON" : "OFF", value);
   if (deviceId == "living_room_light") {
     digitalWrite(PIN_LED_LR_MAIN, power ? HIGH : LOW);
   } else if (deviceId == "living_room_sofa_light") {
@@ -195,6 +197,8 @@ void setDeviceActuator(const String& deviceId, bool power, int value) {
 }
 
 void syncAllFromStates(int lr_main, int lr_sofa, int kit_main, int bed_main, int bed_side, int study, int balcony, int wc, int lr_angle, int bed_angle) {
+  Serial.printf("[ACTUATOR-SYNC] Đồng bộ GPIO: LR[%d,%d,AC:%d°] KIT[%d] BED[%d,%d,AC:%d°] BAL[%d]\n",
+                lr_main, lr_sofa, lr_angle, kit_main, bed_main, bed_side, bed_angle, balcony);
   if (lr_main >= 0) digitalWrite(PIN_LED_LR_MAIN, lr_main ? HIGH : LOW);
   if (lr_sofa >= 0) digitalWrite(PIN_LED_LR_SOFA, lr_sofa ? HIGH : LOW);
   if (kit_main >= 0) {

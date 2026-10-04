@@ -61,11 +61,11 @@ void recordAndSendAudio(int seconds) {
 
   int16_t *pcm_buffer = (int16_t*) malloc(buffer_size_bytes);
   if (!pcm_buffer) {
-    Serial.println("[Audio] Lỗi: Không đủ RAM!");
+    Serial.println("[AUDIO-MIC] LỖI: Không đủ bộ nhớ RAM để cấp phát bộ đệm âm thanh!");
     return;
   }
 
-  Serial.printf("[Audio] Đang thu âm %d giây từ mic INMP441...\n", seconds);
+  Serial.printf("[AUDIO-MIC] >>> BẮT ĐẦU THU ÂM %d GIÂY (16kHz PCM, %d KB) <<<\n", seconds, buffer_size_bytes / 1024);
   
   int samples_read_total = 0;
   int32_t i2s_raw[256];
@@ -80,7 +80,8 @@ void recordAndSendAudio(int seconds) {
     }
   }
 
-  Serial.println("[Audio] Thu âm xong! Đang gửi lên Python API...");
+  Serial.printf("[AUDIO-MIC] Thu âm xong (%d mẫu). Đang gửi POST %s/upload-audio...\n", 
+                samples_read_total, SERVER_API_URL);
 
   HTTPClient http;
   WiFiClientSecure secureClient;
@@ -94,13 +95,33 @@ void recordAndSendAudio(int seconds) {
   }
   http.addHeader("Content-Type", "application/octet-stream");
 
+  unsigned long t0 = millis();
   int httpResponseCode = http.POST((uint8_t*)pcm_buffer, buffer_size_bytes);
+  unsigned long duration = millis() - t0;
 
   if (httpResponseCode > 0) {
-    Serial.printf("[Audio] Gửi thành công! Code: %d\n", httpResponseCode);
+    Serial.printf("[AUDIO-API] Gửi thành công! Mã HTTP: %d (thời gian: %lu ms)\n", httpResponseCode, duration);
     if (httpResponseCode == HTTP_CODE_OK) {
       String response = http.getString();
-      Serial.printf("[Audio Response]: %s\n", response.c_str());
+      
+      // In văn bản STT nhận diện được
+      int transPos = response.indexOf("\"transcript\":\"");
+      if (transPos != -1) {
+        int endQuote = response.indexOf("\"", transPos + 14);
+        if (endQuote != -1) {
+          Serial.printf("[AUDIO-STT] Bạn đã nói: \"%s\"\n", response.substring(transPos + 14, endQuote).c_str());
+        }
+      }
+      
+      // In câu trả lời của Trợ lý AI
+      int respPos = response.indexOf("\"response\":\"");
+      if (respPos != -1) {
+        int endQuote = response.indexOf("\"", respPos + 12);
+        if (endQuote != -1) {
+          Serial.printf("[AUDIO-AI] Trợ lý trả lời: \"%s\"\n", response.substring(respPos + 12, endQuote).c_str());
+        }
+      }
+
       int statesPos = response.indexOf("\"states\":");
       if (statesPos != -1) {
         auto parseVal = [&](const char* key) -> int {
@@ -120,11 +141,14 @@ void recordAndSendAudio(int seconds) {
         int wc_l  = parseVal("\"wc\"");
         int lr_a  = parseVal("\"lr_angle\"");
         int bed_a = parseVal("\"bed_angle\"");
+        
+        Serial.printf("[AUDIO-SYNC] Thực thi phần cứng sau lệnh nói: LR[M:%d,S:%d,AC:%d°] KIT[%d] BED[M:%d,AC:%d°]\n",
+                      lr_m, lr_s, lr_a, kit, bed_m, bed_a);
         syncAllFromStates(lr_m, lr_s, kit, bed_m, bed_s, stdy, bal, wc_l, lr_a, bed_a);
       }
     }
   } else {
-    Serial.printf("[Audio] Lỗi gửi: %s\n", http.errorToString(httpResponseCode).c_str());
+    Serial.printf("[AUDIO-API] LỖI GỬI: %s (mã lỗi: %d)\n", http.errorToString(httpResponseCode).c_str(), httpResponseCode);
   }
 
   http.end();

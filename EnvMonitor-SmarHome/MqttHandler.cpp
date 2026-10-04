@@ -77,6 +77,7 @@ void mqttPublishState(const char* room, const char* deviceId, const char* jsonPa
   if (mqttClient.connected()) {
     String topic = "home/" + String(room) + "/" + String(deviceId) + "/state";
     mqttClient.publish(topic.c_str(), jsonPayload, true); // true = Retained message
+    Serial.printf("[MQTT-TX] %s -> %s (Retained)\n", topic.c_str(), jsonPayload);
   }
 }
 
@@ -85,7 +86,7 @@ void setupMQTT() {
   mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
   mqttClient.setCallback(mqttCallback);
   mqttClient.setBufferSize(512);
-  Serial.println("[MQTT] Đã khởi tạo cấu hình MQTT TLS (HiveMQ Cloud).");
+  Serial.printf("[MQTT] Đã cấu hình Broker: %s:%d (TLS)\n", MQTT_BROKER, MQTT_PORT);
 }
 
 void loopMQTT() {
@@ -95,19 +96,21 @@ void loopMQTT() {
     unsigned long now = millis();
     if (now - lastMqttRetry > 5000) {
       lastMqttRetry = now;
-      Serial.print("[MQTT] Đang kết nối HiveMQ Cloud (TLS 8883)...");
+      Serial.printf("[MQTT] Đang kết nối HiveMQ Cloud TLS 8883 (User: %s)...\n", MQTT_USER);
       const char* willTopic = "home/esp32/availability";
       const char* willMsg = "offline";
       // Kết nối với Last Will and Testament (LWT)
       if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_USER, MQTT_PASS, willTopic, 1, true, willMsg)) {
-        Serial.println(" THÀNH CÔNG!");
+        Serial.printf("[MQTT] ===> KẾT NỐI BROKER THÀNH CÔNG! ClientID: %s\n", MQTT_CLIENT_ID);
         // Lắng nghe lệnh điều khiển từ server & mobile app
         mqttClient.subscribe("home/+/+/set");
         mqttClient.subscribe("home/+/+/set/+");
+        Serial.println("[MQTT] Đã Subscribe: 'home/+/+/set' & 'home/+/+/set/+'");
         // Báo trạng thái online lên broker (Retained)
         mqttClient.publish("home/esp32/availability", "online", true);
+        Serial.println("[MQTT] Đã Publish LWT: home/esp32/availability -> 'online'");
       } else {
-        Serial.printf(" Thất bại, rc=%d (sẽ thử lại sau 5s)\n", mqttClient.state());
+        Serial.printf("[MQTT-ERR] Kết nối thất bại, state rc=%d (sẽ thử lại sau 5s)\n", mqttClient.state());
       }
     }
   } else {

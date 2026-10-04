@@ -8,6 +8,8 @@ void initSensors() {
   digitalWrite(PIN_TRIG, LOW);
   pinMode(PIN_ECHO, INPUT);
   dht.begin();
+  Serial.printf("[SENSOR] Đã khởi tạo DHT11 (Chân D%d), Siêu âm (Trig: D%d, Echo: D%d)\n", 
+                PIN_DHT, PIN_TRIG, PIN_ECHO);
 }
 
 float readUltrasonicDistance() {

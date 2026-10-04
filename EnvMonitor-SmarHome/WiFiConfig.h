@@ -41,9 +41,10 @@ inline bool initWiFiPortal(const char* apName = "ESP32_SmartHome_AP",
     return false;
   }
 
-  Serial.println("[WiFi] Đã kết nối thành công!");
-  Serial.print("[WiFi] IP: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("[WiFi] Đã kết nối Wi-Fi thành công!");
+  Serial.printf("[WiFi] IP: %s | RSSI: %d dBm | Gateway: %s\n", 
+                WiFi.localIP().toString().c_str(), WiFi.RSSI(), WiFi.gatewayIP().toString().c_str());
+  Serial.printf("[WiFi] Server Target: %s\n", SERVER_API_URL);
 
   if (lcd) {
     lcd->clear();

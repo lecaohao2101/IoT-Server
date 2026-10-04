@@ -24,7 +24,6 @@ void sendPartialStatus(const String& jsonPayload) {
 
   int httpCode = http.POST(jsonPayload);
   if (httpCode > 0) {
-    Serial.printf("[Status Partial] Đã gửi: %s | Code: %d\n", jsonPayload.c_str(), httpCode);
     if (httpCode == HTTP_CODE_OK) {
       String response = http.getString();
       int statesPos = response.indexOf("\"states\":");
@@ -46,11 +45,18 @@ void sendPartialStatus(const String& jsonPayload) {
         int wc_l  = parseVal("\"wc\"");
         int lr_a  = parseVal("\"lr_angle\"");
         int bed_a = parseVal("\"bed_angle\"");
+        
+        Serial.printf("[HTTP-RX] 200 OK | Đồng bộ: LR[M:%d,S:%d,AC:%d°] KIT[%d] BED[M:%d,S:%d,AC:%d°] BAL[%d] WC[%d]\n",
+                      lr_m, lr_s, lr_a, kit, bed_m, bed_s, bed_a, bal, wc_l);
         syncAllFromStates(lr_m, lr_s, kit, bed_m, bed_s, stdy, bal, wc_l, lr_a, bed_a);
+      } else {
+        Serial.printf("[HTTP-RX] 200 OK | Phản hồi: %s\n", response.c_str());
       }
+    } else {
+      Serial.printf("[HTTP-RX] Mã HTTP không mong muốn: %d\n", httpCode);
     }
   } else {
-    Serial.printf("[Status Partial] Lỗi gửi: %s\n", http.errorToString(httpCode).c_str());
+    Serial.printf("[HTTP-ERR] Lỗi kết nối Server: %s (code: %d)\n", http.errorToString(httpCode).c_str(), httpCode);
   }
   http.end();
 }
