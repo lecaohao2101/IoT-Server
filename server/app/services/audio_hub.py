@@ -11,7 +11,6 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
 
 from app.ai.base import AudioEncoding
 from app.core.audio import convert_pcm

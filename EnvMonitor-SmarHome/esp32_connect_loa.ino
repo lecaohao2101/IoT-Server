@@ -18,9 +18,9 @@
 // Đặt USE_CLOUD = false nếu muốn kết nối tới IP máy tính cục bộ trong mạng LAN
 const bool USE_CLOUD = true;
 
-// Server Cloud (Fly.io)
+// Server Cloud (Fly.io) - Khuyến nghị Port 80 (HTTP) để tiết kiệm RAM tối đa khi chạy Bluetooth A2DP
 const char* CLOUD_HOST = "smart-apartment-server.fly.dev";
-const int CLOUD_PORT = 443;
+const int CLOUD_PORT = 80; 
 
 // Server Local (Máy tính cá nhân)
 const char* LOCAL_HOST = "192.168.1.12"; 
@@ -53,7 +53,7 @@ int availableBuffer() {
 }
 
 Client& getAudioClient() {
-  if (USE_CLOUD) {
+  if (USE_CLOUD && CLOUD_PORT == 443) {
     return cloudAudioClient;
   }
   return localAudioClient;
@@ -144,10 +144,12 @@ void connectAudioStream() {
   const char* host = USE_CLOUD ? CLOUD_HOST : LOCAL_HOST;
   int port = USE_CLOUD ? CLOUD_PORT : LOCAL_PORT;
 
-  Serial.printf("[STREAM] Đang kết nối luồng Audio TTS tới %s:%d...\n", host, port);
+  Serial.printf("[STREAM] Free Heap: %d bytes | Đang kết nối luồng Audio TTS tới %s:%d...\n", 
+                ESP.getFreeHeap(), host, port);
 
-  if (USE_CLOUD) {
+  if (USE_CLOUD && CLOUD_PORT == 443) {
     cloudAudioClient.setInsecure();
+    cloudAudioClient.setBufferSizes(2048, 1024);
   }
 
   if (client.connect(host, port)) {
