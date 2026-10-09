@@ -9,6 +9,7 @@ Bridges communication with the EnvMonitor-SmarHome firmware:
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Request, status
@@ -16,7 +17,9 @@ from pydantic import BaseModel, Field
 
 from app.ai.base import AudioEncoding
 from app.api.deps import Container
+from app.core.audio import rms
 from app.core.errors import ProviderError
+from app.core.utils import truncate
 
 log = logging.getLogger(__name__)
 
@@ -208,9 +211,21 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
         )
         body = body[: limit - (limit % 2)]
 
+    # peak_level gần 0 nghĩa là mic gửi sự im lặng -- phân biệt được "không nghe
+    # thấy gì" với "nghe thấy nhưng nhận dạng sai".
+    log.info(
+        "upload-audio received",
+        extra={
+            "bytes": len(body),
+            "duration_ms": round(len(body) * 1000.0 / (16000 * 2), 1),
+            "peak_level": rms(body[: 16000 * 2 * 5]),
+        },
+    )
+
     # Transcribe audio using STT
     stream = container.stt.open_stream(language="vi-VN", sample_rate=16000)
     user_text = ""
+    started = time.monotonic()
     try:
         await stream.push(body)
         await stream.end_of_audio()
@@ -229,6 +244,15 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
         }
     finally:
         await stream.aclose()
+
+    log.info(
+        "upload-audio transcript" if user_text else "upload-audio produced nothing",
+        extra={
+            "after_ms": round((time.monotonic() - started) * 1000, 1),
+            "chars": len(user_text),
+            **({"text": truncate(user_text, 200)} if container.settings.log_transcripts else {}),
+        },
+    )
 
     if not user_text:
         return {

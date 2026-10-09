@@ -245,10 +245,21 @@ class SilenceEndpointer:
         self._speech_ms = 0.0
         self._silence_ms = 0.0
         self._triggered = False
+        self._peak = 0
 
     @property
     def speech_detected(self) -> bool:
         return self._triggered
+
+    @property
+    def peak_level(self) -> int:
+        """Loudest frame seen this utterance. Near zero means the mic sent silence."""
+        return self._peak
+
+    @property
+    def noise_floor(self) -> int:
+        """Current estimate of the room's background level."""
+        return int(self._noise)
 
     @property
     def speech_ms(self) -> float:
@@ -258,6 +269,7 @@ class SilenceEndpointer:
         self._speech_ms = 0.0
         self._silence_ms = 0.0
         self._triggered = False
+        self._peak = 0
 
     def accept(self, frame: bytes) -> bool:
         """Feed one frame. Returns True when the utterance looks finished."""
@@ -265,6 +277,7 @@ class SilenceEndpointer:
         if duration <= 0:
             return False
         level = rms(frame, self.fmt.sample_width)
+        self._peak = max(self._peak, level)
 
         if level > self._noise * self.margin:
             self._triggered = True

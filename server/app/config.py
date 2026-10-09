@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     silence_timeout_ms: int = 900
     tts_chunk_bytes: int = 3200  # 100 ms of 16 kHz mono PCM16
 
+    #: Log what was recognised and what was synthesised, not just the byte counts.
+    #: Transcripts are recorded speech, so set LOG_TRANSCRIPTS=false where that
+    #: content should not land in the log stream.
+    log_transcripts: bool = True
+
     # ----------------------------------------------------------- limits
     ws_max_sessions: int = 64
     ws_heartbeat_s: float = 20.0

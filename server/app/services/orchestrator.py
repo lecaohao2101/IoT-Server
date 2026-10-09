@@ -127,6 +127,8 @@ class _SpeechWorker:
         self._started = False
         self.first_audio_ms: float | None = None
         self.failed: str | None = None
+        self.clauses = 0
+        self.audio_bytes = 0
         self._t0 = time.monotonic()
 
     @property
@@ -179,6 +181,8 @@ class _SpeechWorker:
             self.first_audio_ms = (time.monotonic() - self._t0) * 1000.0
             await self._sink.audio_start(audio.encoding, audio.sample_rate)
         payload = audio.audio
+        self.clauses += 1
+        self.audio_bytes += len(payload)
         size = self._chunk_bytes if audio.encoding is AudioEncoding.PCM16 else len(payload)
         for start in range(0, len(payload), max(1, size)):
             if self._sink.cancelled:
@@ -374,6 +378,12 @@ class Orchestrator:
                 "session_id": session_id,
                 "plan": plan.summary() if plan else "no commands",
                 "latency_ms": {k: round(v) for k, v in latency.items()},
+                # Spoken reply as it actually left the server. Zero bytes with a
+                # non-empty speech means synthesis produced nothing.
+                "speech_chars": len(speech or ""),
+                "tts_clauses": worker.clauses if worker else 0,
+                "tts_audio_bytes": worker.audio_bytes if worker else 0,
+                "tts_error": worker.failed if worker and worker.failed else None,
             },
         )
         return result

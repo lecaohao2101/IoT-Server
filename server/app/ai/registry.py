@@ -109,6 +109,7 @@ def build_recognizer(settings: Settings) -> SpeechRecognizer:
             language=settings.stt_language,
             alt_languages=tuple(settings.stt_alt_languages),
             model=settings.stt_model,
+            log_text=settings.log_transcripts,
         )
     except Exception as exc:  # noqa: BLE001
         return _fail_or_fallback(settings, "STT", exc, MockRecognizer())
@@ -125,6 +126,7 @@ def build_synthesizer(settings: Settings) -> SpeechSynthesizer:
             language=settings.stt_language,
             speaking_rate=settings.tts_speaking_rate,
             pitch=settings.tts_pitch,
+            log_text=settings.log_transcripts,
         )
     except Exception as exc:  # noqa: BLE001
         return _fail_or_fallback(settings, "TTS", exc, MockSynthesizer())

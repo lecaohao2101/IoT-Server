@@ -234,3 +234,52 @@ async def test_mic_board_asking_for_no_audio_still_feeds_the_speaker_hub(contain
         assert await asyncio.wait_for(pulled, timeout=1.0), "speaker hub got no audio"
     finally:
         await subscriber.aclose()
+
+
+def _run_one_turn(test_client: TestClient) -> None:
+    with test_client.websocket_connect("/ws/voice") as ws:
+        ws.send_json({"type": "hello", "room": "living_room", "reply_encoding": "pcm16"})
+        ws.receive_json()
+        ws.send_bytes("bật đèn phòng khách".encode())
+        ws.send_json({"type": "audio.end"})
+        _collect(ws, "assistant.final")
+
+
+def test_the_voice_path_logs_audio_in_transcript_out_and_speech_out(client, caplog):
+    """One `fly logs` tail should answer: did audio arrive, what was heard, what was said."""
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        _run_one_turn(client)
+
+    logged = {r.message: r for r in caplog.records}
+    assert "stt audio received" in logged, "no record of the audio that arrived"
+    assert "stt transcript" in logged, "no record of what was recognised"
+    assert "turn complete" in logged, "no record of what was spoken back"
+
+    heard = logged["stt audio received"]
+    assert heard.bytes > 0
+    assert heard.peak_level > 0, "a silent utterance must be visible as peak_level 0"
+
+    assert logged["stt transcript"].text == "bật đèn phòng khách"
+    assert logged["turn complete"].tts_audio_bytes > 0
+
+
+def test_transcripts_can_be_kept_out_of_the_log_stream(settings, caplog):
+    """LOG_TRANSCRIPTS=false must drop the words and keep the diagnostics."""
+    import logging
+
+    from app.main import create_app
+
+    quiet = settings.model_copy(update={"log_transcripts": False})
+    # create_app() runs setup_logging(), which clears every root handler --
+    # caplog's included. Put it back rather than leaving the test silently blind.
+    app = create_app(quiet)
+    logging.getLogger().addHandler(caplog.handler)
+
+    with TestClient(app) as muted, caplog.at_level(logging.INFO):
+        _run_one_turn(muted)
+
+    record = next(r for r in caplog.records if r.message == "stt transcript")
+    assert not hasattr(record, "text"), "transcript text leaked despite LOG_TRANSCRIPTS=false"
+    assert record.chars > 0, "the length is still useful and must survive"

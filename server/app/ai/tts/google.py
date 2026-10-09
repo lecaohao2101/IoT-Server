@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from app.ai.base import AudioEncoding, SpeechAudio, SpeechSynthesizer
 from app.core.audio import wav_to_pcm
 from app.core.errors import ProviderError, ProviderTimeoutError
+from app.core.utils import truncate
 
 log = logging.getLogger(__name__)
 
@@ -31,12 +33,14 @@ class GoogleSynthesizer(SpeechSynthesizer):
         speaking_rate: float = 1.0,
         pitch: float = 0.0,
         timeout_s: float = 10.0,
+        log_text: bool = True,
     ) -> None:
         self._voice = voice
         self._language = language
         self._speaking_rate = speaking_rate
         self._pitch = pitch
         self._timeout = timeout_s
+        self._log_text = log_text
         self._client = None
 
     def _ensure_client(self):
@@ -80,6 +84,7 @@ class GoogleSynthesizer(SpeechSynthesizer):
             ),
         )
 
+        started = time.monotonic()
         try:
             async with asyncio.timeout(self._timeout):
                 response = await client.synthesize_speech(request=request)
@@ -91,15 +96,51 @@ class GoogleSynthesizer(SpeechSynthesizer):
             raise ProviderError(f"Google TTS failed: {exc}") from exc
 
         payload = response.audio_content or b""
+        elapsed_ms = round((time.monotonic() - started) * 1000, 1)
+
         if encoding is AudioEncoding.MP3:
+            self._log_result(clean, len(payload), "mp3", sample_rate, elapsed_ms, None)
             return SpeechAudio(audio=payload, encoding=AudioEncoding.MP3, sample_rate=sample_rate)
 
         pcm, fmt = wav_to_pcm(payload)
+        out_rate = fmt.sample_rate if pcm else sample_rate
+        self._log_result(
+            clean, len(pcm), "pcm16", out_rate, elapsed_ms,
+            round(len(pcm) * 1000.0 / max(1, out_rate * 2), 1),
+        )
         return SpeechAudio(
             audio=pcm,
             encoding=AudioEncoding.PCM16,
-            sample_rate=fmt.sample_rate if pcm else sample_rate,
+            sample_rate=out_rate,
         )
+
+    def _log_result(
+        self,
+        text: str,
+        audio_bytes: int,
+        encoding: str,
+        sample_rate: int,
+        elapsed_ms: float,
+        audio_ms: float | None,
+    ) -> None:
+        """One line per clause: what went to Google, what came back, how long it took.
+
+        ``audio_bytes`` at zero while the call succeeded means the voice produced
+        nothing for that text -- a different problem from the call failing.
+        """
+        fields: dict[str, object] = {
+            "voice": self._voice,
+            "chars": len(text),
+            "audio_bytes": audio_bytes,
+            "encoding": encoding,
+            "sample_rate": sample_rate,
+            "elapsed_ms": elapsed_ms,
+        }
+        if audio_ms is not None:
+            fields["audio_ms"] = audio_ms
+        if self._log_text:
+            fields["text"] = truncate(text, 200)
+        log.info("tts synthesised", extra=fields)
 
     def _language_of(self, voice_name: str) -> str:
         """``vi-VN-Neural2-A`` -> ``vi-VN``; fall back to the configured language."""

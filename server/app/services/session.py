@@ -27,7 +27,7 @@ from app.core.audio import AudioFormat, SilenceEndpointer, resample, to_mono
 from app.core.errors import AppError
 from app.core.eventbus import TOPIC_DEVICE_AVAILABILITY, TOPIC_DEVICE_STATE, EventBus
 from app.core.security import Principal
-from app.core.utils import new_id
+from app.core.utils import new_id, truncate
 from app.logging_setup import trace_id_var
 from app.services.orchestrator import Orchestrator, TurnSink
 
@@ -269,6 +269,17 @@ class VoiceSession(TurnSink):
             language=self._s.stt_language, sample_rate=self._s.audio_sample_rate
         )
         self._stt_task = asyncio.create_task(self._consume_transcripts(), name="stt-consumer")
+        log.info(
+            "stt utterance opened",
+            extra={
+                "session_id": self.session_id,
+                "provider": self._recognizer.name,
+                "language": self._s.stt_language,
+                "sample_rate": self._s.audio_sample_rate,
+                "client_rate": self._client_rate,
+                "client_channels": self._client_channels,
+            },
+        )
 
     async def _end_recognition(self, discard: bool = False) -> None:
         stream, task = self._stream, self._stt_task
@@ -283,6 +294,19 @@ class VoiceSession(TurnSink):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
             return
+        log.info(
+            "stt audio received",
+            extra={
+                "session_id": self.session_id,
+                "bytes": self._utterance_bytes,
+                "duration_ms": round(
+                    self._utterance_bytes * 1000.0 / self._fmt.bytes_per_second, 1
+                ),
+                "peak_level": self._endpointer.peak_level,
+                "noise_floor": self._endpointer.noise_floor,
+                "speech_ms": round(self._endpointer.speech_ms, 1),
+            },
+        )
         await stream.end_of_audio()
 
     async def _consume_transcripts(self) -> None:
@@ -291,6 +315,8 @@ class VoiceSession(TurnSink):
             return
         final_text = ""
         confidence = 0.0
+        started = time.monotonic()
+        heard_partial = False
         try:
             async for result in stream.results():
                 if self._closed:
@@ -299,6 +325,24 @@ class VoiceSession(TurnSink):
                     final_text, confidence = result.text, result.confidence
                     break
                 if result.text:
+                    if not heard_partial:
+                        # The first partial is the proof that audio is both
+                        # arriving and recognisable -- worth one line; the rest
+                        # arrive several times a second and stay at debug.
+                        heard_partial = True
+                        log.info(
+                            "stt first partial",
+                            extra={
+                                "session_id": self.session_id,
+                                "after_ms": round((time.monotonic() - started) * 1000, 1),
+                                **self._text_field(result.text),
+                            },
+                        )
+                    else:
+                        log.debug(
+                            "stt partial",
+                            extra={"session_id": self.session_id, **self._text_field(result.text)},
+                        )
                     await self._send(proto.stt_partial(result.text))
                 if result.speech_ended and not self._audio_ended:
                     await self._end_recognition()
@@ -315,6 +359,16 @@ class VoiceSession(TurnSink):
             if self._stream is stream:
                 self._stream = None
                 self._stt_task = None
+
+        log.info(
+            "stt transcript" if final_text else "stt produced nothing",
+            extra={
+                "session_id": self.session_id,
+                "confidence": round(confidence, 3),
+                "after_ms": round((time.monotonic() - started) * 1000, 1),
+                **self._text_field(final_text),
+            },
+        )
 
         if final_text and not self._closed:
             await self._send(proto.stt_final(final_text, confidence))
@@ -392,6 +446,12 @@ class VoiceSession(TurnSink):
             raise
         except Exception:  # noqa: BLE001
             log.debug("state forwarding stopped", exc_info=True)
+
+    def _text_field(self, text: str) -> dict[str, Any]:
+        """What to log of recognised or spoken text, honouring ``log_transcripts``."""
+        if self._s.log_transcripts:
+            return {"text": truncate(text, 200), "chars": len(text)}
+        return {"chars": len(text)}
 
     async def _send(self, payload: dict[str, Any]) -> None:
         if self._closed:
