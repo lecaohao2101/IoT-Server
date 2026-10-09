@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterator
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +20,24 @@ from app.container import AppContainer
 from app.domain.home import load_home_config
 from app.main import create_app
 from app.safety.rules import load_safety_policy
+from app.safety.validator import CommandValidator
+
+#: Giữa chiều, cách xa khung giờ yên tĩnh 22:00--06:00 của Asia/Ho_Chi_Minh.
+DAYTIME = datetime(2026, 3, 2, 14, 0, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+
+
+@pytest.fixture(autouse=True)
+def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
+    """Pin the policy clock so the suite does not depend on when it runs.
+
+    Quiet hours change what the policy does with a door unlock: ask for
+    confirmation by day, refuse outright by night. Tests that drive the
+    orchestrator or the REST API never pass an explicit ``now``, so without this
+    they pass all morning and fail every evening -- which is exactly how CI found
+    it. ``test_safety.py`` pins its own clock per case and is unaffected.
+    """
+    monkeypatch.setattr(CommandValidator, "local_now", lambda self: DAYTIME)
+    return DAYTIME
 
 
 @pytest.fixture

@@ -528,3 +528,36 @@ async def test_google_stt_splits_buffers_over_the_api_chunk_limit() -> None:
 
     assert sum(sizes) == 64_000
     assert max(sizes) <= MAX_CHUNK_BYTES
+
+
+async def test_the_door_refuses_to_unlock_during_quiet_hours(container, monkeypatch) -> None:
+    """At night the policy refuses outright -- it does not ask for confirmation.
+
+    CI found this the hard way by running at 23:51 local, so pin the hour here and
+    assert the night branch on purpose instead of leaving it to the clock.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.safety.validator import CommandValidator
+
+    night = datetime(2026, 3, 2, 23, 30, tzinfo=ZoneInfo("Asia/Ho_Chi_Minh"))
+    monkeypatch.setattr(CommandValidator, "local_now", lambda self: night)
+
+    llm = ScriptedLlm(
+        {
+            "speech": "Mình sẽ mở khóa cửa.",
+            "commands": [
+                {"device_id": "front_door_lock", "capability": "locked", "value": "false"}
+            ],
+        }
+    )
+    orchestrator = orchestrator_with(container, llm)
+    turn = await orchestrator.run_turn(session_id="s-night", user_text="mở khóa cửa")
+
+    assert not turn.plan.pending_confirmation, "night must not fall back to asking"
+    assert not turn.plan.accepted
+    refused = [r for r in turn.plan.rejected if r.command.device_id == "front_door_lock"]
+    assert refused, "the unlock was neither accepted nor refused"
+    assert "ban đêm" in refused[0].message.lower()
+    assert (await container.conversations.get("s-night")).pending is None
