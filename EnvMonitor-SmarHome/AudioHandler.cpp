@@ -3,8 +3,20 @@
 #include "Controls.h"
 #include <driver/i2s.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <HTTPClient.h>
+
+// Tiếng nói đi theo luồng: mỗi 32 ms mic lại đẩy một khung lên server trong lúc
+// người dùng vẫn còn đang nói. Server tự nhận ra khoảng lặng và chốt câu, nên
+// firmware không còn phải đoán trước "thu bao nhiêu giây".
+//
+// Hai bộ đệm tĩnh dưới đây là toàn bộ RAM mà đường tiếng nói dùng -- 3 KB cố
+// định, nói 2 giây hay 2 phút cũng vậy. Bản cũ cấp phát cả câu nói vào heap
+// (5 giây = 160 KB) rồi mở thêm một kết nối TLS thứ hai trong lúc vẫn đang giữ
+// khối đó, nên câu càng dài càng dễ hết heap giữa chừng.
+static constexpr int FRAME_SAMPLES = 512;  // 512 mẫu @16 kHz = 32 ms = 1024 byte
+static int32_t i2s_raw[FRAME_SAMPLES];
+static int16_t pcm_frame[FRAME_SAMPLES];
+
+static int sound_level = 0;
 
 void setupINMP441() {
   i2s_config_t i2s_config = {
@@ -33,124 +45,237 @@ void setupINMP441() {
 }
 
 int readINMP441SoundLevel() {
-  int32_t samples[128];
+  return sound_level;
+}
+
+// Đọc một khung từ DMA của mic. Không chặn: hết dữ liệu thì trả 0 ngay để loop()
+// còn đi quét nút và bơm MQTT. Bản cũ dùng portMAX_DELAY và khoá cứng loop()
+// suốt cả câu nói.
+static int captureFrame() {
   size_t bytes_read = 0;
-  
-  i2s_read(I2S_PORT, &samples, sizeof(samples), &bytes_read, portMAX_DELAY);
-  int samples_read = bytes_read / sizeof(int32_t);
-  if (samples_read <= 0) return 0;
+  if (i2s_read(I2S_PORT, i2s_raw, sizeof(i2s_raw), &bytes_read, 0) != ESP_OK) return 0;
+
+  int count = bytes_read / sizeof(int32_t);
+  if (count <= 0) return 0;
 
   int64_t sum = 0;
-  for (int i = 0; i < samples_read; i++) {
-    int32_t val = samples[i] >> 14; 
+  for (int i = 0; i < count; i++) {
+    int32_t val = i2s_raw[i] >> 14;
+    pcm_frame[i] = (int16_t)val;
     sum += abs(val);
   }
-  
-  int avg_amplitude = sum / samples_read;
-  return map(constrain(avg_amplitude, 0, 2000), 0, 2000, 0, 100);
+  sound_level = map(constrain((int)(sum / count), 0, 2000), 0, 2000, 0, 100);
+  return count;
 }
 
-void recordAndSendAudio(int seconds) {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[Audio] WiFi chưa kết nối, bỏ qua thu âm!");
-    return;
-  }
+#if __has_include(<WebSocketsClient.h>)
+#include <WebSocketsClient.h>
 
-  int total_samples = 16000 * seconds;
-  int buffer_size_bytes = total_samples * sizeof(int16_t);
+static WebSocketsClient ws;
+static bool ws_ready = false;        // server đã trả session.ready
+static bool talking = false;         // đang mở một câu nói
+static bool force_talk = false;      // nút bấm ép mở câu, bỏ qua ngưỡng âm lượng
+static int  gate_blocks = 0;
+static unsigned long talk_started_ms = 0;
+static unsigned long last_voice_ms = 0;
+static unsigned long last_ping_ms = 0;
 
-  int16_t *pcm_buffer = (int16_t*) malloc(buffer_size_bytes);
-  if (!pcm_buffer) {
-    Serial.println("[AUDIO-MIC] LỖI: Không đủ bộ nhớ RAM để cấp phát bộ đệm âm thanh!");
-    return;
-  }
+bool voiceIsConnected() { return ws_ready; }
+bool voiceIsTalking()   { return talking; }
+void voiceRequestTalk() { force_talk = true; }
 
-  Serial.printf("[AUDIO-MIC] >>> BẮT ĐẦU THU ÂM %d GIÂY (16kHz PCM, %d KB) <<<\n", seconds, buffer_size_bytes / 1024);
-  
-  int samples_read_total = 0;
-  int32_t i2s_raw[256];
-
-  while (samples_read_total < total_samples) {
-    size_t bytes_read = 0;
-    i2s_read(I2S_PORT, &i2s_raw, sizeof(i2s_raw), &bytes_read, portMAX_DELAY);
-    int count = bytes_read / sizeof(int32_t);
-
-    for (int i = 0; i < count && samples_read_total < total_samples; i++) {
-      pcm_buffer[samples_read_total++] = (int16_t)(i2s_raw[i] >> 14);
-    }
-  }
-
-  Serial.printf("[AUDIO-MIC] Thu âm xong (%d mẫu). Đang gửi POST %s/upload-audio...\n", 
-                samples_read_total, SERVER_API_URL);
-
-  HTTPClient http;
-  WiFiClientSecure secureClient;
-  bool isHttps = String(SERVER_API_URL).startsWith("https");
-
-  if (isHttps) {
-    secureClient.setInsecure();
-    http.begin(secureClient, String(SERVER_API_URL) + "/upload-audio");
-  } else {
-    http.begin(String(SERVER_API_URL) + "/upload-audio");
-  }
-  http.addHeader("Content-Type", "application/octet-stream");
-
-  unsigned long t0 = millis();
-  int httpResponseCode = http.POST((uint8_t*)pcm_buffer, buffer_size_bytes);
-  unsigned long duration = millis() - t0;
-
-  if (httpResponseCode > 0) {
-    Serial.printf("[AUDIO-API] Gửi thành công! Mã HTTP: %d (thời gian: %lu ms)\n", httpResponseCode, duration);
-    if (httpResponseCode == HTTP_CODE_OK) {
-      String response = http.getString();
-      
-      // In văn bản STT nhận diện được
-      int transPos = response.indexOf("\"transcript\":\"");
-      if (transPos != -1) {
-        int endQuote = response.indexOf("\"", transPos + 14);
-        if (endQuote != -1) {
-          Serial.printf("[AUDIO-STT] Bạn đã nói: \"%s\"\n", response.substring(transPos + 14, endQuote).c_str());
-        }
-      }
-      
-      // In câu trả lời của Trợ lý AI
-      int respPos = response.indexOf("\"response\":\"");
-      if (respPos != -1) {
-        int endQuote = response.indexOf("\"", respPos + 12);
-        if (endQuote != -1) {
-          Serial.printf("[AUDIO-AI] Trợ lý trả lời: \"%s\"\n", response.substring(respPos + 12, endQuote).c_str());
-        }
-      }
-
-      int statesPos = response.indexOf("\"states\":");
-      if (statesPos != -1) {
-        auto parseVal = [&](const char* key) -> int {
-          int keyPos = response.indexOf(key, statesPos);
-          if (keyPos == -1) return -1;
-          int colPos = response.indexOf(':', keyPos);
-          if (colPos == -1) return -1;
-          return response.substring(colPos + 1).toInt();
-        };
-        int lr_m  = parseVal("\"lr_main\"");
-        int lr_s  = parseVal("\"lr_sofa\"");
-        int kit   = parseVal("\"kit_main\"");
-        int bed_m = parseVal("\"bed_main\"");
-        int bed_s = parseVal("\"bed_side\"");
-        int stdy  = parseVal("\"study\"");
-        int bal   = parseVal("\"balcony\"");
-        int wc_l  = parseVal("\"wc\"");
-        int lr_a  = parseVal("\"lr_angle\"");
-        int bed_a = parseVal("\"bed_angle\"");
-        
-        Serial.printf("[AUDIO-SYNC] Thực thi phần cứng sau lệnh nói: LR[M:%d,S:%d,AC:%d°] KIT[%d] BED[M:%d,AC:%d°]\n",
-                      lr_m, lr_s, lr_a, kit, bed_m, bed_a);
-        syncAllFromStates(lr_m, lr_s, kit, bed_m, bed_s, stdy, bal, wc_l, lr_a, bed_a);
-      }
-    }
-  } else {
-    Serial.printf("[AUDIO-API] LỖI GỬI: %s (mã lỗi: %d)\n", http.errorToString(httpResponseCode).c_str(), httpResponseCode);
-  }
-
-  http.end();
-  free(pcm_buffer);
+// ----------------------------------------------------------------- JSON tối giản
+// Cùng lối đọc bằng indexOf như phần còn lại của firmware: đủ cho các khung điều
+// khiển phẳng của /ws/voice và không kéo thêm thư viện nào vào bộ nhớ.
+static String jsonStr(const String& src, const char* key) {
+  String needle = String("\"") + key + "\":\"";
+  int at = src.indexOf(needle);
+  if (at == -1) return String();
+  int from = at + needle.length();
+  int end = src.indexOf('"', from);
+  return (end == -1) ? String() : src.substring(from, end);
 }
+
+static int jsonInt(const String& src, const char* key, int fallback) {
+  String needle = String("\"") + key + "\":";
+  int at = src.indexOf(needle);
+  if (at == -1) return fallback;
+  return src.substring(at + needle.length()).toInt();
+}
+
+// -------------------------------------------------------------- xử lý khung đến
+static void applyStateChanged(const String& msg) {
+  String deviceId = jsonStr(msg, "device_id");
+  if (deviceId.isEmpty()) return;
+
+  String power = jsonStr(msg, "power");
+  int vane = jsonInt(msg, "vane_angle", -1);
+  if (power.isEmpty() && vane < 0) return;
+
+  Serial.printf("[VOICE-STATE] %s -> %s (góc: %d)\n", deviceId.c_str(),
+                power.isEmpty() ? "-" : power.c_str(), vane);
+  setDeviceActuator(deviceId, power == "on", vane);
+}
+
+static void handleServerMessage(const String& msg) {
+  String type = jsonStr(msg, "type");
+
+  if (type == "session.ready") {
+    ws_ready = true;
+    Serial.printf("[VOICE-WS] Phiên sẵn sàng (%s). Cứ nói tự nhiên, server tự cắt câu.\n",
+                  jsonStr(msg, "session_id").c_str());
+  } else if (type == "stt.partial") {
+    Serial.printf("[VOICE-STT] ... %s\n", jsonStr(msg, "text").c_str());
+  } else if (type == "stt.final") {
+    Serial.printf("[VOICE-STT] Bạn đã nói: \"%s\"\n", jsonStr(msg, "text").c_str());
+  } else if (type == "assistant.final") {
+    Serial.printf("[VOICE-AI] Trợ lý trả lời: \"%s\"\n", jsonStr(msg, "text").c_str());
+    digitalWrite(PIN_BUZZER, HIGH); delay(20); digitalWrite(PIN_BUZZER, LOW);
+  } else if (type == "state.changed") {
+    applyStateChanged(msg);
+  } else if (type == "error" || type == "notice") {
+    Serial.printf("[VOICE-WS] %s: %s\n", jsonStr(msg, "code").c_str(),
+                  jsonStr(msg, "message").c_str());
+  }
+}
+
+static void sendHello() {
+  String hello = String("{\"type\":\"hello\",\"room\":\"") + VOICE_ROOM +
+                 "\",\"device_id\":\"" + VOICE_DEVICE_ID +
+                 "\",\"sample_rate\":16000,\"channels\":1,\"codec\":\"pcm16\"," +
+                 // Loa ngoài A2DP lo phần phát tiếng, board mic không cần nhận
+                 // PCM trả về -- tiết kiệm cả RAM lẫn băng thông.
+                 "\"reply_encoding\":\"none\"}";
+  ws.sendTXT(hello);
+}
+
+static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
+  (void)length;
+  switch (type) {
+    case WStype_CONNECTED:
+      Serial.printf("[VOICE-WS] Đã kết nối %s | Heap trống: %u byte\n",
+                    VOICE_WS_HOST, (unsigned)ESP.getFreeHeap());
+      sendHello();
+      break;
+
+    case WStype_DISCONNECTED: {
+      // Bắt tay hỏng thì cũng chỉ hiện ra ở đây, nên nói rõ chỗ cần xem lại thay
+      // vì im lặng thử lại mỗi 5 giây.
+      static int failed_handshakes = 0;
+      if (ws_ready) {
+        failed_handshakes = 0;
+        Serial.println("[VOICE-WS] Mất kết nối, sẽ tự thử lại sau 5 giây...");
+      } else if (++failed_handshakes == 3) {
+        Serial.println("[VOICE-WS] Không bắt tay được. Kiểm tra VOICE_WS_TOKEN có khớp API_KEY");
+        Serial.println("[VOICE-WS] của server không, và VOICE_WS_HOST/VOICE_WS_PORT đã đúng chưa.");
+      }
+      ws_ready = false;
+      talking = false;
+      gate_blocks = 0;
+      break;
+    }
+
+    case WStype_TEXT:
+      // Thư viện luôn kết thúc payload text bằng NUL.
+      handleServerMessage(String((char*)payload));
+      break;
+
+    case WStype_ERROR:
+      Serial.println("[VOICE-WS] Lỗi socket.");
+      break;
+
+    default:
+      break;
+  }
+}
+
+void voiceBegin() {
+  String path = String(VOICE_WS_PATH) + "?device_id=" + VOICE_DEVICE_ID + "&room=" + VOICE_ROOM;
+  if (strlen(VOICE_WS_TOKEN) > 0) path += String("&token=") + VOICE_WS_TOKEN;
+
+  ws.onEvent(onWsEvent);
+#if VOICE_WS_TLS
+  ws.beginSSL(VOICE_WS_HOST, VOICE_WS_PORT, path.c_str());
+#else
+  ws.begin(VOICE_WS_HOST, VOICE_WS_PORT, path.c_str());
+#endif
+  ws.setReconnectInterval(5000);
+  ws.enableHeartbeat(15000, 3000, 2);
+
+  Serial.printf("[VOICE-WS] Đang mở %s%s:%d%s\n", VOICE_WS_TLS ? "wss://" : "ws://",
+                VOICE_WS_HOST, VOICE_WS_PORT, path.c_str());
+}
+
+static bool pumpFrame() {
+  int samples = captureFrame();
+  if (samples <= 0) return false;
+  if (!ws_ready || WiFi.status() != WL_CONNECTED) return true;
+
+  bool loud = sound_level >= VOICE_GATE_LEVEL;
+  unsigned long now = millis();
+
+  if (!talking) {
+    // Cổng âm thanh: chỉ truyền khi thật sự có người nói. Không có nó, mic đẩy
+    // 32 KB/s suốt ngày và mỗi phút im lặng vẫn bị Google STT tính tiền.
+    gate_blocks = loud ? gate_blocks + 1 : 0;
+    if (!force_talk && gate_blocks < VOICE_GATE_BLOCKS) return true;
+
+    talking = true;
+    force_talk = false;
+    gate_blocks = 0;
+    talk_started_ms = now;
+    last_voice_ms = now;
+    ws.sendTXT("{\"type\":\"audio.start\"}");
+    Serial.printf("[VOICE-MIC] >>> Bắt đầu truyền (mức âm thanh %d) <<<\n", sound_level);
+  }
+
+  ws.sendBIN((uint8_t*)pcm_frame, samples * sizeof(int16_t));
+  if (loud) last_voice_ms = now;
+
+  bool silent_enough = (now - last_voice_ms) >= VOICE_SILENCE_MS;
+  bool too_long = (now - talk_started_ms) >= VOICE_MAX_UTTER_MS;
+  if (silent_enough || too_long) {
+    ws.sendTXT("{\"type\":\"audio.end\"}");
+    talking = false;
+    Serial.printf("[VOICE-MIC] <<< Chốt câu sau %lu ms%s, đang chờ trợ lý trả lời\n",
+                  now - talk_started_ms, too_long ? " (chạm trần thời lượng)" : "");
+  }
+  return true;
+}
+
+void voiceLoop() {
+  ws.loop();
+
+  // Rút tối đa 4 khung mỗi vòng để bắt kịp DMA sau những đoạn loop() bị chặn lâu
+  // (ví dụ một POST HTTPS trạng thái lúc bấm nút). DMA chỉ giữ được 128 ms tiếng.
+  for (int i = 0; i < 4 && pumpFrame(); i++) {}
+
+  // Server đóng phiên sau 120 giây không nhận được gì ở tầng ứng dụng, và ping
+  // của tầng WebSocket không tính. Giữ phiên sống để câu sau không phải bắt tay lại.
+  unsigned long now = millis();
+  if (ws_ready && (now - last_ping_ms) >= 30000) {
+    last_ping_ms = now;
+    ws.sendTXT("{\"type\":\"ping\"}");
+  }
+}
+
+#else
+
+void voiceBegin() {
+  Serial.println("[VOICE] Ghi chú: Cài thư viện 'WebSockets' của Markus Sattler (arduinoWebSockets)");
+  Serial.println("[VOICE] trong Arduino IDE để bật trợ lý giọng nói thời gian thực.");
+}
+
+void voiceLoop() {
+  // Vẫn rút mic để mức âm thanh trên LCD và telemetry tiếp tục cập nhật.
+  captureFrame();
+}
+
+void voiceRequestTalk() {
+  Serial.println("[VOICE] Chưa có thư viện WebSockets -- bỏ qua yêu cầu nói.");
+}
+
+bool voiceIsConnected() { return false; }
+bool voiceIsTalking()   { return false; }
+
+#endif

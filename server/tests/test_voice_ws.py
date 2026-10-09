@@ -163,3 +163,74 @@ def test_events_socket_streams_state_changes(client: TestClient):
                 assert event["device_id"] == "kitchen_light"
                 break
         assert any(t.startswith("device.state") for t in topics)
+
+
+def test_one_socket_carries_several_utterances_back_to_back(client: TestClient):
+    """The ESP32 holds this socket open for the whole conversation.
+
+    Each ``audio.start`` opens a fresh utterance on the same session, so a second
+    sentence must be recognised and acted on without reconnecting.
+    """
+    with client.websocket_connect("/ws/voice") as ws:
+        ws.send_json({"type": "hello", "room": "living_room", "reply_encoding": "none"})
+        assert ws.receive_json()["type"] == "session.ready"
+
+        said = ["bật đèn phòng khách", "tắt đèn phòng khách"]
+        devices = []
+        for sentence in said:
+            ws.send_json({"type": "audio.start"})
+            ws.send_bytes(sentence.encode())
+            ws.send_json({"type": "audio.end"})
+
+            frames, audio = _collect(ws, "assistant.final")
+            assert not audio, "reply_encoding=none must not stream audio"
+            transcripts = [f["text"] for f in frames if f["type"] == "stt.final"]
+            assert sentence in transcripts
+
+            accepted = frames[-1]["plan"]["accepted"]
+            devices.append([c["device_id"] for c in accepted])
+
+        assert all("living_room_light" in d for d in devices)
+
+
+async def test_mic_board_asking_for_no_audio_still_feeds_the_speaker_hub(container) -> None:
+    """The board that hears is not the board that speaks.
+
+    The ESP32 holding the microphone sends ``reply_encoding: "none"`` -- its reply
+    plays on a Bluetooth speaker wired to another board, which pulls from the audio
+    hub. Synthesis must follow the hub, not this socket's encoding.
+    """
+    import asyncio
+
+    from app.api import ws_protocol as proto
+    from app.core.security import Principal
+    from app.services.session import VoiceSession
+
+    class _NullSocket:
+        async def send_json(self, payload): ...
+        async def send_bytes(self, payload): ...
+
+    session = VoiceSession(
+        _NullSocket(),
+        orchestrator=container.orchestrator,
+        recognizer=container.stt,
+        settings=container.settings,
+        bus=container.bus,
+        principal=Principal(kind="device", id="esp32_master"),
+        audio_hub=container.audio_hub,
+    )
+    await session._on_hello(proto.HelloMessage(type="hello", reply_encoding="none"))
+
+    # Nobody is listening yet: synthesising would burn TTS on silence.
+    assert session._speak is False
+
+    subscriber = container.audio_hub.subscribe(target_rate=16000, target_channels=1)
+    pulled = asyncio.create_task(subscriber.__anext__())
+    await asyncio.sleep(0.05)
+    try:
+        assert session._speak is True, "a connected speaker must bring synthesis back"
+
+        await session.audio_chunk(b"\x01\x02" * 160)
+        assert await asyncio.wait_for(pulled, timeout=1.0), "speaker hub got no audio"
+    finally:
+        await subscriber.aclose()

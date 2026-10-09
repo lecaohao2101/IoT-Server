@@ -156,9 +156,10 @@ void handleButtons() {
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     Serial.printf("[BTN-CLICK] Nút Ban Công -> Đèn: %s\n", state_balcony ? "BAT" : "TAT");
     
-    // Thu âm 5 giây khi bấm nút Ban Công và gửi lên AI Server
-    Serial.println("[Click] Kích hoạt thu âm Ban Công (5 giây) gửi AI...");
-    recordAndSendAudio(5);
+    // Mở ngay một câu nói trên luồng WebSocket đang mở sẵn. Không còn thu đủ N
+    // giây rồi mới gửi: tiếng đi lên server trong lúc người dùng vẫn đang nói.
+    Serial.println("[Click] Mở micro gửi trợ lý AI (nói tự nhiên, server tự cắt câu)...");
+    voiceRequestTalk();
     
     delay(50);
   }

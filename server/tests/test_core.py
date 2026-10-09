@@ -427,3 +427,16 @@ def test_missing_credentials_file_points_at_the_container_fix(tmp_path, monkeypa
         apply_google_credentials(
             Settings(_env_file=None, google_application_credentials=tmp_path / "absent.json")
         )
+
+
+def test_log_extra_never_crashes_on_a_reserved_key() -> None:
+    """``extra={"message": ...}`` must not take the request down with a KeyError."""
+    import logging
+
+    from app.logging_setup import safe_extra, setup_logging
+
+    setup_logging(level="WARNING", as_json=True)
+    log = logging.getLogger("test.reserved.extra")
+    log.error("request failed", extra={"code": "provider_error", "message": "boom"})
+
+    assert safe_extra({"message": "boom", "code": "x"}) == {"x_message": "boom", "code": "x"}

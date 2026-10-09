@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from app.ai.base import AudioEncoding
 from app.api.deps import Container
+from app.core.errors import ProviderError
 
 log = logging.getLogger(__name__)
 
@@ -196,6 +197,17 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
             "message": "Audio payload too short or empty",
         }
 
+    # The firmware posts one whole recording. Cap it at the per-utterance ceiling,
+    # on a PCM16 sample boundary, rather than streaming a buffer the recogniser
+    # would have to drop frames from.
+    limit = container.settings.max_audio_bytes_per_utterance
+    if len(body) > limit:
+        log.warning(
+            "upload-audio payload truncated",
+            extra={"received_bytes": len(body), "limit_bytes": limit},
+        )
+        body = body[: limit - (limit % 2)]
+
     # Transcribe audio using STT
     stream = container.stt.open_stream(language="vi-VN", sample_rate=16000)
     user_text = ""
@@ -205,6 +217,16 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
         async for transcript in stream.results():
             if transcript.is_final and transcript.text.strip():
                 user_text = transcript.text.strip()
+    except ProviderError as exc:
+        # The ESP32 only reads JSON from a 200. A provider hiccup should leave it
+        # something to say, not an HTTP error it silently discards.
+        log.warning("upload-audio stt failed", extra={"reason": str(exc)})
+        return {
+            "success": False,
+            "transcript": "",
+            "response": "Xin lỗi, hiện chưa nhận dạng được giọng nói.",
+            "error": "stt_failed",
+        }
     finally:
         await stream.aclose()
 

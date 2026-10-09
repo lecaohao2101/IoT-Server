@@ -103,3 +103,34 @@ def test_upload_audio_executes_voice_command(client: TestClient) -> None:
     assert "transcript" in data
     assert "response" in data
     assert "states" in data
+
+
+def test_upload_audio_survives_an_stt_provider_failure(client: TestClient) -> None:
+    """A provider error must come back as JSON the firmware can read, not a 500."""
+    from app.ai.base import SttStream
+    from app.core.errors import ProviderError
+
+    class FailingStream(SttStream):
+        async def push(self, pcm: bytes) -> None: ...
+
+        async def end_of_audio(self) -> None: ...
+
+        async def results(self):
+            raise ProviderError("Google STT stream failed: 400 chunk too large")
+            yield  # pragma: no cover - makes this an async generator
+
+        async def aclose(self) -> None: ...
+
+    container = client.app.state.container
+    original = container.stt.open_stream
+    container.stt.open_stream = lambda **kwargs: FailingStream()
+    try:
+        res = client.post("/upload-audio", content=b"\x01\x02" * 64)
+    finally:
+        container.stt.open_stream = original
+
+    assert res.status_code == 200
+    data = res.json()
+    assert data["success"] is False
+    assert data["error"] == "stt_failed"
+    assert data["response"]

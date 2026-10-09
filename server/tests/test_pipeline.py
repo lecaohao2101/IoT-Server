@@ -507,3 +507,24 @@ async def test_a_normal_turn_leaves_no_background_tasks(container):
         if not t.done() and t not in before and t.get_name() in {"tts-worker", "turn"}
     }
     assert leaked == set()
+
+
+async def test_google_stt_splits_buffers_over_the_api_chunk_limit() -> None:
+    """A whole HTTP upload must reach Google as chunks it accepts, not one blob.
+
+    Google rejects any streaming request carrying more than 25600 bytes of audio
+    with INVALID_ARGUMENT, and the ESP32 posts 2 s (64000 bytes) in one request.
+    """
+    from app.ai.stt.google_v2 import MAX_CHUNK_BYTES, GoogleSttStream
+
+    stream = GoogleSttStream(
+        client=None, recognizer="r", streaming_config=None, request_cls=lambda **kw: kw
+    )
+    await stream.push(b"\x01\x02" * 32_000)  # 64000 bytes, one firmware recording
+
+    sizes = []
+    while not stream._audio.empty():
+        sizes.append(len(stream._audio.get_nowait()))
+
+    assert sum(sizes) == 64_000
+    assert max(sizes) <= MAX_CHUNK_BYTES

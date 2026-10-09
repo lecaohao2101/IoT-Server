@@ -114,7 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         if exc.http_status >= 500:
-            log.error("request failed", extra={"code": exc.code, "message": exc.message})
+            log.error("request failed", extra={"code": exc.code, "reason": exc.message})
         return JSONResponse(status_code=exc.http_status, content={"error": exc.to_dict()})
 
     @app.exception_handler(RequestValidationError)

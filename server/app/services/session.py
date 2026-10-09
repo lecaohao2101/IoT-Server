@@ -63,7 +63,7 @@ class VoiceSession(TurnSink):
         self._client_rate = settings.audio_sample_rate
         self._client_channels = 1
         self._reply_encoding = AudioEncoding.PCM16
-        self._speak = True
+        self._client_wants_audio = True
 
         self._fmt = AudioFormat(sample_rate=settings.audio_sample_rate)
         self._endpointer = SilenceEndpointer(
@@ -87,20 +87,37 @@ class VoiceSession(TurnSink):
     def cancelled(self) -> bool:
         return self._cancelled or self._closed
 
+    @property
+    def _speak(self) -> bool:
+        """Whether this turn is worth synthesising at all.
+
+        The board holding the microphone asks for ``reply_encoding: "none"``
+        because its reply comes out of a Bluetooth speaker wired to a *different*
+        board, which pulls from the audio hub. Tying synthesis to this socket's
+        encoding would leave that speaker silent for every spoken command.
+        """
+        if self._client_wants_audio:
+            return True
+        return bool(self._audio_hub and self._audio_hub.active_subscribers_count > 0)
+
     async def assistant_delta(self, text: str) -> None:
         await self._send(proto.assistant_delta(text))
 
     async def audio_start(self, encoding: AudioEncoding, sample_rate: int) -> None:
-        await self._send(proto.tts_start(encoding.value, sample_rate))
+        if self._client_wants_audio:
+            await self._send(proto.tts_start(encoding.value, sample_rate))
 
     async def audio_chunk(self, payload: bytes) -> None:
-        if payload and not self.cancelled:
+        if not payload or self.cancelled:
+            return
+        if self._client_wants_audio:
             await self._send_bytes(payload)
-            if self._audio_hub:
-                await self._audio_hub.broadcast_chunk(payload, src_rate=self._fmt.sample_rate)
+        if self._audio_hub:
+            await self._audio_hub.broadcast_chunk(payload, src_rate=self._fmt.sample_rate)
 
     async def audio_end(self) -> None:
-        await self._send(proto.tts_end())
+        if self._client_wants_audio:
+            await self._send(proto.tts_end())
 
     async def notice(self, code: str, message: str) -> None:
         await self._send(proto.notice(code, message))
@@ -183,7 +200,7 @@ class VoiceSession(TurnSink):
         self.room = message.room or self.room
         self._client_rate = message.sample_rate
         self._client_channels = message.channels
-        self._speak = message.reply_encoding != "none"
+        self._client_wants_audio = message.reply_encoding != "none"
         if message.reply_encoding in {"pcm16", "mp3", "wav"}:
             self._reply_encoding = AudioEncoding(message.reply_encoding)
         await self._greet()
@@ -197,7 +214,7 @@ class VoiceSession(TurnSink):
                 self.session_id,
                 room=self.room,
                 sample_rate=self._s.audio_sample_rate,
-                reply_encoding=self._reply_encoding.value if self._speak else "none",
+                reply_encoding=self._reply_encoding.value if self._client_wants_audio else "none",
                 silence_timeout_ms=self._s.silence_timeout_ms,
                 max_utterance_s=self._s.max_utterance_s,
             )

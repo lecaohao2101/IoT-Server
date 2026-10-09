@@ -41,12 +41,20 @@ void setup() {
   Serial.println("[INIT] Khởi tạo kết nối MQTT TLS HiveMQ Cloud...");
   setupMQTT();
 
+  // 5. Mở phiên thoại thời gian thực tới /ws/voice
+  Serial.println("[INIT] Mở phiên trợ lý giọng nói thời gian thực...");
+  voiceBegin();
+
   Serial.println("[SYSTEM] ===> KHỞI ĐỘNG HOÀN TẤT! BẮT ĐẦU VÒNG LẶP GIÁM SÁT <===");
 }
 
 void loop() {
   // Lắng nghe MQTT (Non-blocking)
   loopMQTT();
+
+  // Bơm phiên thoại: đọc mic, đẩy tiếng đang nói lên server, nhận lệnh trả về.
+  // Phải chạy mỗi vòng -- DMA của mic chỉ giữ được 128 ms tiếng.
+  voiceLoop();
 
   // Đọc nút bấm liên tục (Real-time)
   handleButtons();

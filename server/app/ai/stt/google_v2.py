@@ -23,6 +23,12 @@ log = logging.getLogger(__name__)
 
 _SENTINEL = object()
 
+#: Google STT v2 rejects any ``StreamingRecognizeRequest`` whose ``audio`` field is
+#: larger than this (INVALID_ARGUMENT). Callers hand us whole buffers -- an HTTP
+#: upload of a 2 s recording is 64000 bytes -- so the split belongs here, next to
+#: the API whose limit it is.
+MAX_CHUNK_BYTES = 25_600
+
 
 class GoogleSttStream(SttStream):
     def __init__(
@@ -44,14 +50,18 @@ class GoogleSttStream(SttStream):
     async def push(self, pcm: bytes) -> None:
         if self._closed or not pcm:
             return
+        for start in range(0, len(pcm), MAX_CHUNK_BYTES):
+            self._offer(pcm[start : start + MAX_CHUNK_BYTES])
+
+    def _offer(self, chunk: bytes) -> None:
         try:
-            self._audio.put_nowait(pcm)
+            self._audio.put_nowait(chunk)
         except asyncio.QueueFull:
             # Recognition has fallen behind. Dropping the oldest frame keeps the
             # stream real-time; dropping the newest would stutter the transcript.
             with contextlib.suppress(asyncio.QueueEmpty):
                 self._audio.get_nowait()
-            self._audio.put_nowait(pcm)
+            self._audio.put_nowait(chunk)
 
     async def end_of_audio(self) -> None:
         if not self._closed:
