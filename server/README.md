@@ -239,6 +239,19 @@ Tất cả dưới `/api/v1`. Xác thực: `Authorization: Bearer <API_KEY>` ho�
 | `GET` | `/api/v1/chat/{session_id}` | Lịch sử phiên |
 | `DELETE` | `/api/v1/chat/{session_id}` | Xoá phiên |
 | `POST` | `/api/v1/speak` | Tổng hợp giọng nói cho văn bản bất kỳ (WAV/MP3) |
+| `GET` | `/api/v1/logs?after=` | Vòng đệm log gần nhất kèm nguyên vẹn các trường `extra`. **Cần xác thực** |
+| `GET` | `/logs` | Trang xem log trực tiếp. Bản thân trang không mang dữ liệu, nó hỏi API key rồi tự poll |
+
+### Xem log chi tiết
+
+Console của Fly làm phẳng mỗi bản ghi thành một dòng, nên mất đúng phần cần nhìn:
+các trường `extra` như `peak_level`, `audio_bytes`, `confidence`, `tts_audio_bytes`.
+Mở `https://<host>/logs`, dán API key, trang sẽ hiện các trường đó cạnh thông điệp,
+ẩn sẵn access log lặp và các đường thăm dò, và có nút lọc riêng cho luồng thoại.
+
+Vòng đệm nằm trong bộ nhớ tiến trình (`LOG_TAIL_SIZE`, mặc định 500 bản ghi) — là
+đuôi log trực tiếp, không phải nơi lưu trữ. Thứ cần sống qua lần khởi động lại vẫn
+phải đi qua `fly logs` hoặc Grafana.
 
 Ví dụ — giá trị bị kẹp chứ không bị từ chối:
 

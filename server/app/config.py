@@ -112,6 +112,9 @@ class Settings(BaseSettings):
     #: content should not land in the log stream.
     log_transcripts: bool = True
 
+    #: How many recent records /logs keeps in memory. A live tail, not storage.
+    log_tail_size: int = 500
+
     # ----------------------------------------------------------- limits
     ws_max_sessions: int = 64
     ws_heartbeat_s: float = 20.0

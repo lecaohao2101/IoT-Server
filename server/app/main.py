@@ -58,7 +58,9 @@ async def lifespan(app: FastAPI):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
-    setup_logging(settings.log_level, as_json=settings.log_json)
+    setup_logging(
+        settings.log_level, as_json=settings.log_json, tail_size=settings.log_tail_size
+    )
 
     app = FastAPI(
         title=settings.app_name,
@@ -99,7 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         elapsed_ms = (time.monotonic() - started) * 1000.0
         response.headers["x-request-id"] = trace_id
         response.headers["x-response-time-ms"] = f"{elapsed_ms:.1f}"
-        if request.url.path not in {"/healthz", "/readyz"}:
+        if request.url.path not in {"/healthz", "/readyz", "/api/v1/logs"}:
             log.info(
                 "http request",
                 extra={

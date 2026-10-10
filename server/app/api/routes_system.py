@@ -1,15 +1,18 @@
-"""Liveness, readiness and introspection endpoints."""
+"""Liveness, readiness, introspection and the live log tail."""
 
 from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header, Response, status
+from fastapi import APIRouter, Header, Query, Response, status
+from fastapi.responses import HTMLResponse
 
 from app import __version__
 from app.api.deps import Container, CurrentPrincipal
 from app.core.errors import UnauthorizedError
+from app.core.log_stream import log_tail
 from app.core.security import authenticate, extract_bearer
+from app.web.log_viewer import LOG_VIEWER_HTML
 
 router = APIRouter(tags=["system"])
 
@@ -91,3 +94,24 @@ async def system_info(container: Container, _: CurrentPrincipal) -> dict[str, An
         "auth_required": settings.auth_enabled,
         "anonymous_allowed": not settings.auth_enabled,
     }
+
+
+@router.get("/api/v1/logs", summary="Recent log records with their structured fields")
+async def recent_logs(
+    _: CurrentPrincipal,
+    after: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+) -> dict[str, Any]:
+    """Everything logged since sequence ``after``.
+
+    Credentialed: these records carry transcripts and internal detail, which is
+    why this sits behind the same key as the rest of the API.
+    """
+    records, newest = log_tail.since(after=after, limit=limit)
+    return {"records": records, "last_seq": newest}
+
+
+@router.get("/logs", summary="Live log viewer", response_class=HTMLResponse)
+async def log_viewer_page() -> HTMLResponse:
+    """The page itself carries no data -- it asks for a key and then polls."""
+    return HTMLResponse(content=LOG_VIEWER_HTML)

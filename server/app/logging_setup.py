@@ -82,7 +82,7 @@ class HumanFormatter(logging.Formatter):
         return base
 
 
-def setup_logging(level: str = "INFO", as_json: bool = True) -> None:
+def setup_logging(level: str = "INFO", as_json: bool = True, tail_size: int = 500) -> None:
     _install_extra_guard()
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter() if as_json else HumanFormatter())
@@ -90,6 +90,15 @@ def setup_logging(level: str = "INFO", as_json: bool = True) -> None:
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
+
+    # Keep the same records in memory with their fields intact, so /logs can show
+    # what a flattened console line throws away. Imported here: log_stream reads
+    # this module, so a top-level import would be circular.
+    from app.core.log_stream import log_tail
+
+    log_tail.resize(tail_size)
+    root.addHandler(log_tail)
+
     root.setLevel(level.upper())
 
     for noisy in ("uvicorn.access", "websockets", "aiomqtt", "httpx", "google"):

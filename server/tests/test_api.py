@@ -274,3 +274,49 @@ def test_build_is_reported_without_a_credential(settings: Settings):
     stamped = Settings(**{**settings.model_dump(), "api_key": "s3cret", "build_sha": "abc1234"})
     with TestClient(create_app(stamped)) as client:
         assert client.get("/readyz").json()["build"] == "abc1234"
+
+
+# -------------------------------------------------------------- log viewer
+
+
+def test_log_viewer_page_is_served_without_a_key(secured_client: TestClient):
+    """The page carries no data; it asks for the key and polls from the browser."""
+    page = secured_client.get("/logs")
+    assert page.status_code == 200
+    assert "text/html" in page.headers["content-type"]
+    assert "s3cret" not in page.text
+
+
+def test_the_log_feed_needs_a_credential(secured_client: TestClient):
+    """Records carry transcripts and internal detail -- same key as the rest."""
+    assert secured_client.get("/api/v1/logs").status_code == 401
+    assert secured_client.get("/api/v1/logs", headers={"x-api-key": "s3cret"}).status_code == 200
+
+
+def test_the_log_feed_keeps_structured_fields_and_advances_its_cursor(client: TestClient):
+    """What Fly's console flattens away is exactly what this has to preserve."""
+    import logging
+
+    logging.getLogger("app.test.viewer").warning(
+        "stt audio received", extra={"bytes": 41984, "peak_level": 21189}
+    )
+
+    first = client.get("/api/v1/logs").json()
+    mine = [r for r in first["records"] if r["msg"] == "stt audio received"]
+    assert mine, "the record never reached the tail"
+    assert mine[-1]["fields"]["peak_level"] == 21189
+    assert mine[-1]["fields"]["bytes"] == 41984
+    assert mine[-1]["level"] == "WARNING"
+
+    # A cursor at the head must not replay what the client already has.
+    again = client.get(f"/api/v1/logs?after={first['last_seq']}").json()
+    assert not [r for r in again["records"] if r["msg"] == "stt audio received"]
+
+
+def test_the_viewer_does_not_log_its_own_polling(client: TestClient):
+    """Polling once a second would otherwise fill the buffer with its own echo."""
+    client.get("/api/v1/logs")
+    for _ in range(5):
+        client.get("/api/v1/logs")
+    records = client.get("/api/v1/logs?after=0&limit=1000").json()["records"]
+    assert not [r for r in records if r.get("fields", {}).get("path") == "/api/v1/logs"]
