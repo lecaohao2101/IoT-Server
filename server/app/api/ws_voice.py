@@ -30,6 +30,21 @@ router = APIRouter(tags=["websocket"])
 _active_sessions = 0
 
 
+def _offered_credential(websocket: WebSocket, token: str | None) -> str:
+    """Where a credential came from, never the credential itself.
+
+    "none" and "query" are different bugs: the first is firmware that forgot the
+    token, the second is a token that simply does not match.
+    """
+    if token:
+        return "query"
+    if websocket.headers.get("authorization"):
+        return "header:authorization"
+    if websocket.headers.get("x-api-key"):
+        return "header:x-api-key"
+    return "none"
+
+
 @router.websocket("/ws/voice")
 async def voice_endpoint(
     websocket: WebSocket,
@@ -44,10 +59,27 @@ async def voice_endpoint(
     try:
         principal = authenticate_websocket(container, websocket, token, device_id)
     except UnauthorizedError as exc:
+        # A socket turned away here never reaches accept(), so it produces no
+        # access line either: without this the device simply vanishes from the
+        # logs and the symptom reads as "the firmware never called".
+        log.warning(
+            "voice socket rejected",
+            extra={
+                "reason": exc.code,
+                "device_id": device_id,
+                "room": room,
+                "credential_offered": _offered_credential(websocket, token),
+                "client": websocket.client.host if websocket.client else None,
+            },
+        )
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.message)
         return
 
     if _active_sessions >= container.settings.ws_max_sessions:
+        log.warning(
+            "voice socket refused -- session limit reached",
+            extra={"active": _active_sessions, "limit": container.settings.ws_max_sessions},
+        )
         await websocket.close(code=status.WS_1013_TRY_AGAIN_LATER, reason="Too many sessions")
         return
 
@@ -85,6 +117,14 @@ async def events_endpoint(
     try:
         authenticate_websocket(container, websocket, token, None)
     except UnauthorizedError as exc:
+        log.warning(
+            "events socket rejected",
+            extra={
+                "reason": exc.code,
+                "credential_offered": _offered_credential(websocket, token),
+                "client": websocket.client.host if websocket.client else None,
+            },
+        )
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.message)
         return
 

@@ -381,13 +381,28 @@ class VoiceSession(TurnSink):
         self._turn_task = asyncio.create_task(self._run_turn(text), name="turn")
 
     async def _run_turn(self, text: str) -> None:
+        speak = self._speak
+        if not speak:
+            # The mic board asks for no audio and nothing is pulling from the hub,
+            # so this reply will be silent. Say so: a speaker that dropped off is
+            # otherwise indistinguishable from TTS being broken.
+            log.warning(
+                "tts skipped -- nobody is listening",
+                extra={
+                    "session_id": self.session_id,
+                    "client_wants_audio": self._client_wants_audio,
+                    "hub_subscribers": (
+                        self._audio_hub.active_subscribers_count if self._audio_hub else 0
+                    ),
+                },
+            )
         try:
             result = await self._orchestrator.run_turn(
                 session_id=self.session_id,
                 user_text=text,
                 room=self.room,
                 sink=self,
-                speak=self._speak,
+                speak=speak,
                 encoding=self._reply_encoding,
                 sample_rate=self._s.audio_sample_rate,
             )

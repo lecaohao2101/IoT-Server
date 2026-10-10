@@ -283,3 +283,55 @@ def test_transcripts_can_be_kept_out_of_the_log_stream(settings, caplog):
     record = next(r for r in caplog.records if r.message == "stt transcript")
     assert not hasattr(record, "text"), "transcript text leaked despite LOG_TRANSCRIPTS=false"
     assert record.chars > 0, "the length is still useful and must survive"
+
+
+def test_a_rejected_voice_socket_says_so_in_the_log(settings, caplog):
+    """A device turned away at the handshake must not vanish silently.
+
+    The close happens before accept(), so there is no access-log line either --
+    this warning is the only evidence the firmware ever reached the server.
+    """
+    import logging
+
+    from pydantic import SecretStr
+
+    from app.main import create_app
+
+    guarded = settings.model_copy(update={"api_key": SecretStr("right-key")})
+    app = create_app(guarded)
+    logging.getLogger().addHandler(caplog.handler)
+
+    with TestClient(app) as guarded_client, caplog.at_level(logging.WARNING):
+        try:
+            with guarded_client.websocket_connect("/ws/voice?token=wrong-key") as ws:
+                ws.receive_json()
+        except Exception:  # noqa: BLE001 - the refusal type varies by Starlette version
+            pass
+
+    rejected = [r for r in caplog.records if r.message == "voice socket rejected"]
+    assert rejected, "the rejection left no trace in the log"
+    assert rejected[0].credential_offered == "query"
+    assert "wrong-key" not in caplog.text, "the credential must never be logged"
+
+
+def test_a_silent_reply_announces_itself(client, caplog):
+    """A reply nobody can hear must be loud in the log.
+
+    The mic board asks for no audio and the Bluetooth speaker pulls from the hub.
+    When that speaker drops off -- it runs out of heap once A2DP pairs -- the turn
+    still succeeds and still sets the lights, it just makes no sound. Without this
+    warning that is indistinguishable from TTS being broken.
+    """
+    import logging
+
+    with caplog.at_level(logging.WARNING), client.websocket_connect("/ws/voice") as ws:
+        ws.send_json({"type": "hello", "reply_encoding": "none"})
+        ws.receive_json()
+        ws.send_bytes("bật đèn phòng khách".encode())
+        ws.send_json({"type": "audio.end"})
+        _collect(ws, "assistant.final")
+
+    skipped = [r for r in caplog.records if r.message == "tts skipped -- nobody is listening"]
+    assert skipped, "a silent reply went unreported"
+    assert skipped[0].hub_subscribers == 0
+    assert skipped[0].client_wants_audio is False

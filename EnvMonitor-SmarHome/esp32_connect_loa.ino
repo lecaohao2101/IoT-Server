@@ -5,7 +5,7 @@
 #include "BluetoothA2DPSource.h"
 #include <math.h>
 #include <HTTPClient.h>
-#include <WiFiClientSecure.h>
+#include "esp_bt.h"
 
 // ============================================================================
 // 1. CẤU HÌNH & KHAI BÁO BIẾN TOÀN CỤC
@@ -29,8 +29,9 @@ const int LOCAL_PORT = 8000;
 BluetoothA2DPSource a2dp_source;
 WebServer server(80);
 
+// Cổng 80: không dựng TLS. Giữ một WiFiClientSecure ở đây chỉ tốn RAM, mà RAM
+// là thứ board này không có. Muốn chạy 443 thì phải tính lại ngân sách bộ nhớ.
 WiFiClient localAudioClient;
-WiFiClientSecure cloudAudioClient;
 
 static float m_time = 0.0;
 bool is_bt_connected = false;
@@ -53,9 +54,6 @@ int availableBuffer() {
 }
 
 Client& getAudioClient() {
-  if (USE_CLOUD && CLOUD_PORT == 443) {
-    return cloudAudioClient;
-  }
   return localAudioClient;
 }
 
@@ -147,11 +145,6 @@ void connectAudioStream() {
   Serial.printf("[STREAM] Free Heap: %d bytes | Đang kết nối luồng Audio TTS tới %s:%d...\n", 
                 ESP.getFreeHeap(), host, port);
 
-  if (USE_CLOUD && CLOUD_PORT == 443) {
-    cloudAudioClient.setInsecure();
-    cloudAudioClient.setBufferSizes(2048, 1024);
-  }
-
   if (client.connect(host, port)) {
     // Yêu cầu luồng âm thanh 44.1kHz Stereo (tương thích trực tiếp chuẩn A2DP Bluetooth)
     String request = String("GET /api/audio/stream?rate=44100&channels=2 HTTP/1.1\r\n") +
@@ -175,7 +168,16 @@ void connectAudioStream() {
     }
   } else {
     is_stream_connected = false;
-    Serial.println("[STREAM] Kết nối Server thất bại, sẽ thử lại sau 5s...");
+    size_t heap = ESP.getFreeHeap();
+    if (heap < 20000) {
+      // Mở một TCP socket cần vài KB liền kề. Dưới ngưỡng này thì không phải
+      // mạng hỏng mà là hết RAM -- hai lỗi cần sửa theo hai hướng khác hẳn nhau.
+      Serial.printf("[STREAM] Kết nối thất bại vì HẾT RAM (%u bytes). Mạng không phải thủ phạm.
+",
+                    (unsigned)heap);
+    } else {
+      Serial.println("[STREAM] Kết nối Server thất bại, sẽ thử lại sau 5s...");
+    }
   }
 }
 
@@ -237,17 +239,14 @@ void handleSay() {
     String textToSay = server.arg("text");
     Serial.printf("\n[WEB UI] Yêu cầu phát TTS: '%s'\n", textToSay.c_str());
 
+    // Cùng cổng 80 như luồng audio. Dựng TLS ở đây là chỗ dễ hết heap nhất trên
+    // board này: handshake cần vài chục KB trong khi A2DP đã ăn gần hết.
     HTTPClient http;
-    Client& baseClient = getAudioClient();
-    String serverUrl = (USE_CLOUD ? "https://" + String(CLOUD_HOST) : "http://" + String(LOCAL_HOST) + ":" + String(LOCAL_PORT)) + "/api/audio/play";
-
-    if (USE_CLOUD) {
-      WiFiClientSecure secureClient;
-      secureClient.setInsecure();
-      http.begin(secureClient, serverUrl);
-    } else {
-      http.begin(serverUrl);
-    }
+    WiFiClient webClient;
+    String serverUrl = String("http://") + (USE_CLOUD ? String(CLOUD_HOST) + ":" + String(CLOUD_PORT)
+                                                      : String(LOCAL_HOST) + ":" + String(LOCAL_PORT)) +
+                       "/api/audio/play";
+    http.begin(webClient, serverUrl);
 
     http.addHeader("Content-Type", "application/json");
     String jsonPayload = "{\"text\":\"" + textToSay + "\"}";
@@ -322,6 +321,16 @@ void setup() {
   a2dp_source.set_data_callback(get_sound_data);                    
   a2dp_source.set_auto_reconnect(false);                            
 
+  // A2DP chỉ cần Bluetooth Classic (BR/EDR). Controller mặc định giữ sẵn cả phần
+  // RAM cho BLE -- ở đây không bao giờ dùng tới. Trả lại trước khi controller khởi
+  // tạo, nếu không heap còn ~8 KB sau khi ghép loa và không mở nổi một TCP socket.
+  size_t heap_before = ESP.getFreeHeap();
+  esp_err_t released = esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
+  Serial.printf("[A2DP] Trả lại RAM của BLE: %s | Heap %u -> %u bytes
+",
+                released == ESP_OK ? "OK" : "bỏ qua",
+                (unsigned)heap_before, (unsigned)ESP.getFreeHeap());
+
   Serial.println("[A2DP] Bắt đầu quét các loa Bluetooth xung quanh...");
   a2dp_source.start(); 
 }
@@ -343,12 +352,14 @@ void loop() {
 
   // Đọc dữ liệu audio stream từ Server đưa vào Ring Buffer để phát ra Loa
   while (client.connected() && client.available()) {
-    int nextTail = (tail + 1) % AUDIO_BUFFER_SIZE;
-    if (nextTail != head) { 
-      audioBuffer[tail] = client.read();
-      tail = nextTail;
-    } else {
-      break; 
-    }
+    // Vùng trống liền kề tới cuối mảng, để đọc được cả khối một lần. 44.1 kHz
+    // stereo là 176 KB/s -- gọi read() từng byte là phí CPU mà board không dư.
+    int room = (tail >= head) ? (AUDIO_BUFFER_SIZE - tail - (head == 0 ? 1 : 0))
+                              : (head - tail - 1);
+    if (room <= 0) break;
+
+    int got = client.read(audioBuffer + tail, room);
+    if (got <= 0) break;
+    tail = (tail + got) % AUDIO_BUFFER_SIZE;
   }
 }
