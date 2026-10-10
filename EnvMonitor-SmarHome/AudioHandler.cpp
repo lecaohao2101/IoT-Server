@@ -261,9 +261,14 @@ void voiceLoop() {
 
 #else
 
+// Thiếu thư viện thì cả đường tiếng nói biến mất khỏi firmware. Trước đây chuyện
+// đó chỉ lộ ra trên Serial lúc chạy, nên đọc như "board không gọi server".
+// Cảnh báo ngay lúc biên dịch để không bao giờ nạp nhầm một bản firmware câm.
+#warning "Khong tim thay WebSocketsClient.h -- tro ly giong noi bi loai khoi firmware. Cai thu vien 'WebSockets' (Markus Sattler)."
+
 void voiceBegin() {
-  Serial.println("[VOICE] Ghi chú: Cài thư viện 'WebSockets' của Markus Sattler (arduinoWebSockets)");
-  Serial.println("[VOICE] trong Arduino IDE để bật trợ lý giọng nói thời gian thực.");
+  Serial.println("[VOICE] ===> CANH BAO: Firmware nay KHONG co phan tro ly giong noi! <===");
+  Serial.println("[VOICE] Thieu thu vien 'WebSockets' cua Markus Sattler luc bien dich.");
 }
 
 void voiceLoop() {
