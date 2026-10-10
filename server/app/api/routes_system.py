@@ -85,6 +85,9 @@ async def system_info(container: Container, _: CurrentPrincipal) -> dict[str, An
             "encoding": "pcm16",
             "silence_timeout_ms": settings.silence_timeout_ms,
             "max_utterance_s": settings.max_utterance_s,
+            # Loa đang kéo tiếng từ audio hub. Bằng 0 nghĩa là không thiết bị nào
+            # phát được lời đáp, dù phần nhận dạng và điều khiển vẫn chạy đúng.
+            "speaker_listeners": container.audio_hub.active_subscribers_count,
         },
         "safety": {
             "max_commands_per_plan": container.policy.max_commands_per_plan,

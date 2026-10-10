@@ -329,3 +329,8 @@ def test_the_viewer_does_not_log_its_own_polling(client: TestClient):
         client.get("/api/v1/logs")
     records = client.get("/api/v1/logs?after=0&limit=1000").json()["records"]
     assert not [r for r in records if r.get("fields", {}).get("path") == "/api/v1/logs"]
+
+
+def test_system_info_reports_whether_any_speaker_is_listening(client: TestClient):
+    """Answers "is my speaker connected?" without reading a single log line."""
+    assert client.get("/api/v1/system/info").json()["audio"]["speaker_listeners"] == 0
