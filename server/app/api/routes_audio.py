@@ -192,6 +192,11 @@ async def voice_demo_page() -> HTMLResponse:
         
         <div id="statusBadge" class="status-badge">Đang khởi tạo...</div>
         
+        <div style="margin-bottom: 16px; display: flex; justify-content: center; gap: 8px;">
+            <input type="password" id="tokenInput" placeholder="Nhập API Key / Token..." style="background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 6px 12px; color: #fff; width: 240px; font-size: 13px;">
+            <button id="saveTokenBtn" style="background: var(--accent); border: none; border-radius: 6px; padding: 6px 14px; font-weight: bold; cursor: pointer; color: #0f172a;">Lưu & Kết nối</button>
+        </div>
+        
         <div>
             <button id="micBtn" class="mic-btn" title="Nhấn để nói chuyện">
                 <svg class="mic-icon" viewBox="0 0 24 24">
@@ -217,6 +222,19 @@ async def voice_demo_page() -> HTMLResponse:
         const statusBadge = document.getElementById('statusBadge');
         const chatBox = document.getElementById('chatBox');
         const actionHint = document.getElementById('actionHint');
+        const tokenInput = document.getElementById('tokenInput');
+        const saveTokenBtn = document.getElementById('saveTokenBtn');
+
+        const urlParams = new URLSearchParams(window.location.search);
+        let currentToken = urlParams.get('token') || localStorage.getItem('voiceToken') || localStorage.getItem('logKey') || '';
+        if (currentToken) tokenInput.value = currentToken;
+
+        saveTokenBtn.onclick = () => {
+            currentToken = tokenInput.value.trim();
+            localStorage.setItem('voiceToken', currentToken);
+            localStorage.setItem('logKey', currentToken);
+            initWebSocket();
+        };
 
         let ws = null;
         let audioContext = null;
@@ -235,8 +253,13 @@ async def voice_demo_page() -> HTMLResponse:
         }
 
         function initWebSocket() {
+            if (ws) {
+                ws.onclose = null;
+                ws.close();
+            }
             const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${proto}//${window.location.host}/ws/voice`;
+            const query = currentToken ? `?token=${encodeURIComponent(currentToken)}` : '';
+            const wsUrl = `${proto}//${window.location.host}/ws/voice${query}`;
             statusBadge.textContent = 'Đang kết nối WebSocket...';
             statusBadge.className = 'status-badge';
 
@@ -269,10 +292,15 @@ async def voice_demo_page() -> HTMLResponse:
                 }
             };
 
-            ws.onclose = () => {
-                statusBadge.textContent = 'Mất kết nối. Đang thử lại...';
-                statusBadge.className = 'status-badge';
-                setTimeout(initWebSocket, 3000);
+            ws.onclose = (event) => {
+                if (event.code === 1008) {
+                    statusBadge.textContent = 'Lỗi xác thực: Sai hoặc thiếu API Key';
+                    statusBadge.className = 'status-badge';
+                } else {
+                    statusBadge.textContent = 'Mất kết nối. Đang thử lại...';
+                    statusBadge.className = 'status-badge';
+                    setTimeout(initWebSocket, 3000);
+                }
             };
         }
 
