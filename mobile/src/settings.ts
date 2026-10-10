@@ -15,6 +15,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'smart-apartment.settings.v1';
 
+export type MqttSettings = {
+  /** Cho phép kết nối MQTT trực tiếp từ mobile */
+  enabled: boolean;
+  /** Host của MQTT broker (hỗ trợ WebSocket) */
+  host: string;
+  /** Port WebSocket của MQTT (mặc định 8884 cho HiveMQ Cloud TLS, 9001 cho Mosquitto WS) */
+  port: number;
+  /** WebSocket path (mặc định '/mqtt') */
+  path: string;
+  /** Sử dụng SSL/TLS wss:// */
+  ssl: boolean;
+  /** Tên đăng nhập broker */
+  user: string;
+  /** Mật khẩu broker */
+  pass: string;
+  /** Base topic của căn hộ (mặc định 'home') */
+  baseTopic: string;
+};
+
+export const DEFAULT_MQTT_SETTINGS: MqttSettings = {
+  enabled: true,
+  host: 'navyqueen-54cb285b.a01.euc1.aws.hivemq.cloud',
+  port: 8884,
+  path: '/mqtt',
+  ssl: true,
+  user: 'esp32_device',
+  pass: 'esp32_device',
+  baseTopic: 'home',
+};
+
 export type Settings = {
   /** Base HTTP URL of the server, e.g. http://192.168.1.12:8000 */
   serverUrl: string;
@@ -24,6 +54,8 @@ export type Settings = {
   room: string;
   /** Stable id so the conversation survives app restarts. */
   sessionId: string;
+  /** Cấu hình kết nối MQTT trực tiếp */
+  mqtt: MqttSettings;
 };
 
 /** Server đã deploy. Đổi trong màn hình Cài đặt khi muốn chạy LAN. */
@@ -34,6 +66,7 @@ export const DEFAULT_SETTINGS: Settings = {
   token: '',
   room: 'living_room',
   sessionId: `mobile-${Math.random().toString(36).slice(2, 10)}`,
+  mqtt: DEFAULT_MQTT_SETTINGS,
 };
 
 export const ROOMS = [
@@ -50,7 +83,15 @@ export async function loadSettings(): Promise<Settings> {
     if (!raw) return DEFAULT_SETTINGS;
     // Merge over the defaults so a settings file written by an older build,
     // missing a field added since, does not produce `undefined` in a URL.
-    return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<Settings>) };
+    const parsed = JSON.parse(raw) as Partial<Settings>;
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      mqtt: {
+        ...DEFAULT_MQTT_SETTINGS,
+        ...(parsed.mqtt || {}),
+      },
+    };
   } catch {
     return DEFAULT_SETTINGS;
   }

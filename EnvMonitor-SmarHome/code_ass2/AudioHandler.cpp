@@ -190,6 +190,13 @@ static void onWsEvent(WStype_t type, uint8_t* payload, size_t length) {
 }
 
 void voiceBegin() {
+  // Server dang bat API_KEY thi socket bi tu choi ngay o buoc bat tay, va tu phia
+  // mach chi thay "mat ket noi" lap lai. Noi thang ra tu luc khoi dong.
+  if (strlen(VOICE_WS_TOKEN) == 0) {
+    Serial.println("[VOICE-WS] CANH BAO: VOICE_WS_TOKEN dang de trong.");
+    Serial.println("[VOICE-WS] Neu server co API_KEY thi moi ket noi se bi tu choi (HTTP 403).");
+  }
+
   String path = String(VOICE_WS_PATH) + "?device_id=" + VOICE_DEVICE_ID + "&room=" + VOICE_ROOM;
   if (strlen(VOICE_WS_TOKEN) > 0) path += String("&token=") + VOICE_WS_TOKEN;
 

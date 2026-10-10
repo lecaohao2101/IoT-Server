@@ -40,6 +40,8 @@ import { voiceSocketUrl, type Settings } from './settings';
 
 const MIC_ENCODING = 'int16' as const;
 const PING_INTERVAL_MS = 20000;
+// Mã đóng WebSocket server dùng khi từ chối xác thực (policy violation).
+const WS_POLICY_VIOLATION = 1008;
 const RECONNECT_DELAY_MS = 2000;
 const RECONNECT_MAX_DELAY_MS = 30000;
 
@@ -287,10 +289,12 @@ export function useVoiceSession(settings: Settings | null) {
     socket.onerror = () => {
       if (!isCurrent()) return;
       setState('error');
-      setError('Không kết nối được tới server. Kiểm tra địa chỉ trong Cài đặt.');
+      // Nguyên nhân thật nằm ở mã đóng, onclose luôn chạy ngay sau onerror và
+      // sẽ ghi đè thông báo này bằng câu chính xác hơn.
+      setError('Không kết nối được tới server.');
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event: WebSocketCloseEvent) => {
       if (!isCurrent()) return;
       if (pingRef.current) clearInterval(pingRef.current);
       pingRef.current = null;
@@ -298,6 +302,21 @@ export function useVoiceSession(settings: Settings | null) {
       recordingRef.current = false;
       setRecording(false);
       setState((previous) => (previous === 'error' ? 'error' : 'offline'));
+
+      // Server từ chối ở bước bắt tay thì đóng với 1008. Thử lại không bao giờ
+      // sửa được một khoá sai -- nó chỉ đập vào tường mỗi 30 giây và làm ngập
+      // log của server. Dừng lại và nói đúng chỗ cần sửa.
+      if (event?.code === WS_POLICY_VIOLATION) {
+        wantConnectedRef.current = false;
+        attemptRef.current = 0;
+        setState('error');
+        setError(
+          current.token.trim()
+            ? 'Server từ chối khoá API. Kiểm tra lại token trong Cài đặt.'
+            : 'Server yêu cầu khoá API. Hãy nhập token trong Cài đặt.'
+        );
+        return;
+      }
 
       if (wantConnectedRef.current) {
         // Back off: an unreachable server should not be retried every 2.5 s

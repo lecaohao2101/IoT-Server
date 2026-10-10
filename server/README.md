@@ -600,9 +600,14 @@ tests/               124 test
    nên `?token=...&device_id=...` là đường chính thức, không phải đường vòng.
 6. **MQTT**: đặt last-will trên topic `availability` với payload `offline`, retained.
    Dashboard sẽ biết thiết bị mất điện mà không cần poll.
-7. **Bản hiện thực**: `EnvMonitor-SmarHome/AudioHandler.cpp` (board mic ESP32-S3) đã
+7. **Bản hiện thực**: `EnvMonitor-SmarHome/code_ass2/AudioHandler.cpp` (board ESP32-S3) đã
    làm đúng hợp đồng trên — `voiceBegin()` mở phiên, `voiceLoop()` đẩy khung 32 ms
    trong lúc người dùng còn đang nói. Cần thư viện `WebSockets` của Markus Sattler
    (arduinoWebSockets); thiếu nó firmware vẫn biên dịch được và chỉ báo trên Serial.
    Board này xin `reply_encoding: "none"` vì loa Bluetooth A2DP ở board riêng lo
    phần phát tiếng.
+8. **Mic hiện không cắm vào board S3.** Mic INMP441 đang nằm chung board ESP32 classic
+   với loa A2DP (`EnvMonitor-SmarHome/esp32_connect_loa/`), và board đó gửi tiếng nói
+   qua `POST /upload-audio` chứ không qua `/ws/voice` — A2DP đã ăn gần hết RAM, không
+   còn chỗ cho thư viện WebSocket. Đường `/ws/voice` ở trên vẫn đúng và vẫn được app
+   mobile dùng.

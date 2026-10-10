@@ -226,5 +226,54 @@ test('token KHÔNG được nhúng sẵn trong app', () => {
   assert.equal(DEFAULT_SETTINGS.token, '');
 });
 
+// ------------------------------------------------------------------- Devices & MQTT
+import { DEFAULT_DEVICES, isDeviceOn, getDeviceStatusLabel, type DeviceItem } from '../src/devices.ts';
+import { DEFAULT_MQTT_SETTINGS } from '../src/settings.ts';
+
+test('DEFAULT_DEVICES chứa đúng 16 thiết bị căn hộ thông minh', () => {
+  assert.equal(DEFAULT_DEVICES.length, 16);
+});
+
+test('isDeviceOn nhận diện đúng trạng thái BẬT và TẮT của đèn', () => {
+  const lightOn: DeviceItem = {
+    id: 'living_room_light',
+    name: 'Đèn phòng khách',
+    type: 'light',
+    room: 'living_room',
+    roomName: 'Phòng khách',
+    capabilities: ['power'],
+    state: { power: 'on' },
+  };
+  const lightOff: DeviceItem = { ...lightOn, state: { power: 'off' } };
+  assert.equal(isDeviceOn(lightOn), true);
+  assert.equal(isDeviceOn(lightOff), false);
+  assert.equal(getDeviceStatusLabel(lightOn), 'ĐANG BẬT');
+  assert.equal(getDeviceStatusLabel(lightOff), 'ĐANG TẮT');
+});
+
+test('isDeviceOn nhận diện đúng trạng thái rèm và khóa cửa', () => {
+  const lockLocked: DeviceItem = {
+    id: 'front_door_lock',
+    name: 'Khóa cửa',
+    type: 'lock',
+    room: 'living_room',
+    roomName: 'Phòng khách',
+    capabilities: ['locked'],
+    state: { locked: true },
+  };
+  const lockUnlocked: DeviceItem = { ...lockLocked, state: { locked: false } };
+  assert.equal(isDeviceOn(lockLocked), false); // locked = off/đã khóa
+  assert.equal(isDeviceOn(lockUnlocked), true); // unlocked = on/đã mở
+  assert.equal(getDeviceStatusLabel(lockLocked), 'Đã khóa');
+  assert.equal(getDeviceStatusLabel(lockUnlocked), 'Đã mở khóa');
+});
+
+test('DEFAULT_MQTT_SETTINGS trỏ đúng broker HiveMQ Cloud TLS 8884', () => {
+  assert.equal(DEFAULT_MQTT_SETTINGS.enabled, true);
+  assert.equal(DEFAULT_MQTT_SETTINGS.port, 8884);
+  assert.equal(DEFAULT_MQTT_SETTINGS.ssl, true);
+  assert.equal(DEFAULT_MQTT_SETTINGS.baseTopic, 'home');
+});
+
 console.log(`\n${passed} đạt, ${failed} lỗi`);
 process.exit(failed === 0 ? 0 : 1);

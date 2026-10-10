@@ -49,6 +49,14 @@ constexpr int SERVO_ANGLE_CLOSE = 0;
 // API Server URL (Đã cấu hình server deployed trên Cloud Fly.io)
 const char SERVER_API_URL[] = "https://smart-apartment-server.fly.dev";
 
+// ==================== WI-FI ====================
+// Thu ket noi thang toi mang nay truoc. Khong vao duoc trong WIFI_CONNECT_TIMEOUT_MS
+// thi quay ve Captive Portal cua WiFiManager nhu cu.
+// De WIFI_SSID rong ("") neu muon bo hoan toan buoc nay va chi dung portal.
+#define WIFI_SSID     "51_Nguyen_Thien_Ke"
+#define WIFI_PASSWORD "0986172846"
+#define WIFI_CONNECT_TIMEOUT_MS 25000
+
 // ============ TRỢ LÝ GIỌNG NÓI THỜI GIAN THỰC (WebSocket /ws/voice) ============
 // Mic đẩy thẳng từng khung 32 ms lên server trong lúc người dùng còn đang nói.
 // Không bao giờ giữ cả câu nói trong RAM, nên độ dài câu không còn bị heap chặn.
@@ -63,7 +71,7 @@ const char SERVER_API_URL[] = "https://smart-apartment-server.fly.dev";
 
 // Khớp với API_KEY đặt bằng `fly secrets set API_KEY=...`. Để rỗng nếu server đang
 // chạy ALLOW_ANONYMOUS=true.
-#define VOICE_WS_TOKEN  ""
+#define VOICE_WS_TOKEN  "7c1fbbd67e08ac63980f764e833f4171d4e22740970a83d1"
 #define VOICE_DEVICE_ID "esp32_master"
 #define VOICE_ROOM      "living_room"
 

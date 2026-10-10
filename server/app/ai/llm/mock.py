@@ -69,7 +69,12 @@ class MockLanguageModel(LanguageModel):
     ) -> AsyncIterator[str]:
         user_turns = [m.content for m in messages if m.role == "user" and m.content]
         user_text = user_turns[-1] if user_turns else ""
-        reply = self._reason(user_text, system, history=list(reversed(user_turns[:-1])))
+        reply = self._reason(
+            user_text,
+            system,
+            history=list(reversed(user_turns[:-1])),
+            messages=messages,
+        )
         payload = json.dumps(reply, ensure_ascii=False)
         for start in range(0, len(payload), self._chunk_size):
             if self._delay:
@@ -77,26 +82,218 @@ class MockLanguageModel(LanguageModel):
             yield payload[start : start + self._chunk_size]
 
     # ----------------------------------------------------------- reasoning
-    def _reason(self, text: str, system: str, history: list[str] | None = None) -> dict[str, Any]:
+    def _reason(
+        self,
+        text: str,
+        system: str,
+        history: list[str] | None = None,
+        messages: list[LlmMessage] | None = None,
+    ) -> dict[str, Any]:
         norm = strip_accents(text).lower().strip()
         current_room = self._current_room(system)
         state = self._parse_state(system)
+        room = self._match_room(norm) or current_room
 
-        # 1. Trả lời thân thiện khi người dùng nói lửng lơ hoặc chào hỏi
-        _VAGUE_PHRASES = (
-            "toi can", "toi muon", "giup toi", "tro ly oi", "alo",
-            "chao ban", "ban oi", "co ai khong", "hi", "hello", "giup voi"
-        )
-        words = [w for w in norm.replace(".", " ").split() if w]
-        if (any(norm.startswith(p) for p in _VAGUE_PHRASES) or norm in {"toi can", "toi can."}) and len(words) <= 4 and not self._has_action(norm):
+        # Lấy lịch sử hội thoại gần nhất (assistant và user)
+        last_assistant = ""
+        if messages:
+            assistants = [m.content for m in messages if m.role == "assistant" and m.content]
+            if assistants:
+                last_assistant = assistants[-1]
+        last_assistant_norm = strip_accents(last_assistant).lower().strip()
+        prev_user_norm = strip_accents(history[0]).lower().strip() if (history and history[0]) else ""
+
+        # -------------------------------------------------------
+        # 1. GIAO TIẾP TỰ NHIÊN GIỮA NGƯỜI VỚI NGƯỜI (Small-talk & Empathy)
+        # -------------------------------------------------------
+        # 1.1 Lời cảm ơn
+        if any(w in norm for w in ("cam on", "thank you", "thanks", "cam on nha", "cam on nhe")):
+            gratitude_replies = [
+                "Dạ không có chi đâu nè! Cần gì bạn cứ gọi mình nhé.",
+                "Rất vui được hỗ trợ bạn nè! Chúc bạn một ngày thật vui vẻ nhé.",
+                "Dạ có gì đâu bạn ơi, giúp bạn là niềm vui của mình mà.",
+            ]
+            idx = sum(ord(c) for c in norm) % len(gratitude_replies)
             return {
-                "speech": "Mình đây, bạn cần mình hỗ trợ gì ạ? Bật đèn, chỉnh điều hòa hay mở rèm?",
+                "speech": gratitude_replies[idx],
+                "commands": [],
+                "scene": None,
+                "needs_clarification": False,
+            }
+
+        # 1.2 Mệt mỏi / Đi làm về
+        if any(w in norm for w in ("met qua", "met moi", "met qua di", "di lam met", "duoi qua", "met moi qua")):
+            return {
+                "speech": "Thương bạn ghê, bạn đã vất vả cả ngày rồi! Bạn nghỉ ngơi chút nha, có cần mình bật điều hòa mát hay mở nhạc thư giãn cho bạn không nè?",
                 "commands": [],
                 "scene": None,
                 "needs_clarification": True,
             }
 
-        # 2. Khớp kịch bản (Scenes)
+        # 1.3 Chúc ngủ ngon
+        if any(w in norm for w in ("chuc ngu ngon", "ngu ngon nhe", "ngu ngon nha")):
+            return {
+                "speech": "Chúc bạn có một giấc ngủ thật ngon và những giấc mơ đẹp nhé!",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": False,
+            }
+
+        # 1.4 Danh tính & Thăm hỏi
+        if any(w in norm for w in ("ban la ai", "ban ten gi", "gioi thieu ban than")):
+            return {
+                "speech": "Mình là người bạn trợ lý thông minh của căn hộ, luôn ở đây để đồng hành và hỗ trợ bạn điều khiển ngôi nhà thân yêu nè!",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": False,
+            }
+        if any(w in norm for w in ("ban co khoe khong", "khoe khong")):
+            return {
+                "speech": "Mình luôn tràn đầy năng lượng và sẵn sàng giúp bạn nè! Bạn hôm nay thế nào rồi?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": False,
+            }
+
+        # 1.5 Chào hỏi xã giao
+        _GREETINGS = ("chao ban", "xin chao", "chao tro ly", "hi ban", "hello", "alo tro ly")
+        if any(norm == w or norm.startswith(w + " ") for w in _GREETINGS) and not self._has_action(norm) and len(norm.split()) <= 4:
+            return {
+                "speech": "Chào bạn! Rất vui được trò chuyện với bạn. Hôm nay bạn cần mình hỗ trợ gì không nè?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": True,
+            }
+
+        # 1.6 Câu lửng lơ
+        _VAGUE_PHRASES = (
+            "toi can", "toi muon", "giup toi", "tro ly oi", "alo",
+            "ban oi", "co ai khong", "giup voi"
+        )
+        words = [w for w in norm.replace(".", " ").split() if w]
+        if (any(norm.startswith(p) for p in _VAGUE_PHRASES) or norm in {"toi can", "toi can."}) and len(words) <= 4 and not self._has_action(norm):
+            return {
+                "speech": "Mình đây, bạn cần mình hỗ trợ gì nè? Bật đèn, chỉnh điều hòa hay mở rèm?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": True,
+            }
+
+        # -------------------------------------------------------
+        # 2. TIẾP NỐI NGỮ CẢNH TỪ LƯỢT TRƯỚC (Multi-Turn Continuity)
+        # -------------------------------------------------------
+        # 2.1 Người dùng xác nhận đề xuất trước đó (vd: "buồn ngủ quá" -> "có cần tắt đèn..." -> "ừ/tắt đi")
+        _AFFIRMATIVES = ("co", "u", "uh", "ok", "duoc", "vang", "dong y", "nho ban", "giup minh", "lam di")
+        is_affirmative = norm in _AFFIRMATIVES or any(norm.startswith(w + " ") for w in _AFFIRMATIVES)
+        is_turn_off_confirm = is_affirmative or any(norm == w or norm.startswith(w + " ") for w in ("tat di", "tat den di", "tat giup"))
+        is_turn_on_confirm = is_affirmative or any(norm == w or norm.startswith(w + " ") for w in ("bat di", "bat len", "bat giup", "bat den di"))
+
+        if last_assistant_norm:
+            # Đề xuất tắt đèn trước đó
+            if is_turn_off_confirm and any(w in last_assistant_norm for w in ("tat den", "de ngu khong", "tat bot den")):
+                target_room = current_room or "bedroom"
+                lights = [d for d in self._home.devices if d.type is DeviceType.LIGHT and (d.room == target_room or not current_room)]
+                if not lights:
+                    lights = [d for d in self._home.devices if d.type is DeviceType.LIGHT]
+                cmds = []
+                for light in lights:
+                    power_cap = self._power_capability(light.writable_capabilities)
+                    if power_cap:
+                        cmds.append(self._cmd(light, power_cap, self._power_value(power_cap, on=False)))
+                return {
+                    "speech": "Vâng, mình đã tắt đèn cho bạn rồi, chúc bạn ngủ thật ngon nhé!",
+                    "commands": cmds,
+                    "scene": None,
+                    "needs_clarification": False,
+                }
+            # Đề xuất bật đèn trước đó
+            if is_turn_on_confirm and any(w in last_assistant_norm for w in ("bat den", "cho sang khong", "sang khong")):
+                target_room = current_room or "living_room"
+                light = self._find_device_of_type(DeviceType.LIGHT, target_room)
+                if light:
+                    cmds = self._set_light_comfort(light, brightness=100)
+                    return {
+                        "speech": "Dạ được rồi, mình đã bật đèn lên cho bạn rồi nhé!",
+                        "commands": cmds,
+                        "scene": None,
+                        "needs_clarification": False,
+                    }
+
+        # 2.2 Người dùng trả lời tên phòng sau khi trợ lý hỏi làm rõ (vd: "bật đèn" -> "phòng nào?" -> "phòng khách")
+        matched_room = self._match_room(norm)
+        if matched_room is not None and not self._has_action(norm):
+            context_text = f"{last_assistant_norm} {prev_user_norm}"
+            room_display = self._room_name(matched_room)
+            if any(w in context_text for w in ("den", "light")):
+                is_off = any(w in context_text for w in _OFF_WORDS)
+                light = self._find_device_of_type(DeviceType.LIGHT, matched_room)
+                if light:
+                    power_cap = self._power_capability(light.writable_capabilities)
+                    if power_cap:
+                        val = self._power_value(power_cap, on=not is_off)
+                        cmds = [self._cmd(light, power_cap, val)]
+                        action_text = "tắt" if is_off else "bật"
+                        return {
+                            "speech": f"Dạ được rồi, mình đã {action_text} đèn {room_display} cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
+            elif any(w in context_text for w in ("dieu hoa", "may lanh", "ac")):
+                is_off = any(w in context_text for w in _OFF_WORDS)
+                ac = self._find_device_of_type(DeviceType.AIR_CONDITIONER, matched_room)
+                if ac:
+                    power_cap = self._power_capability(ac.writable_capabilities)
+                    if power_cap:
+                        val = self._power_value(power_cap, on=not is_off)
+                        cmds = [self._cmd(ac, power_cap, val)]
+                        action_text = "tắt" if is_off else "bật"
+                        return {
+                            "speech": f"Dạ, mình đã {action_text} điều hòa {room_display} cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
+            elif any(w in context_text for w in ("rem", "curtain")):
+                is_close = any(w in context_text for w in ("dong", "tat", "khep"))
+                curtain = self._find_device_of_type(DeviceType.CURTAIN, matched_room)
+                if curtain:
+                    power_cap = self._power_capability(curtain.writable_capabilities)
+                    if power_cap:
+                        val = self._power_value(power_cap, on=not is_close)
+                        cmds = [self._cmd(curtain, power_cap, val)]
+                        action_text = "đóng" if is_close else "mở"
+                        return {
+                            "speech": f"Dạ, mình đã {action_text} rèm {room_display} cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
+
+        # -------------------------------------------------------
+        # 3. TÍNH SUY LUẬN CHỦ ĐỘNG (Proactive Inference)
+        # -------------------------------------------------------
+        # 3.1 "Tôi buồn ngủ quá"
+        if any(w in norm for w in ("buon ngu qua", "buon ngu roi", "buon ngu", "muon di ngu", "met qua muon di ngu")):
+            return {
+                "speech": "Bạn có cần mình tắt đèn cho dễ ngủ không?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": True,
+            }
+
+        # 3.2 "Trời tối quá nhỉ" / "Tối quá"
+        if any(w in norm for w in ("troi toi qua", "toi qua nhi", "sao toi the", "phong toi qua", "toi qua di", "toi the nhi")) and not self._has_action(norm):
+            return {
+                "speech": "Bạn có cần bật đèn cho sáng không?",
+                "commands": [],
+                "scene": None,
+                "needs_clarification": True,
+            }
+
+        # -------------------------------------------------------
+        # 4. KHỚP KỊCH BẢN (Scenes)
+        # -------------------------------------------------------
         scene_id = self._match_scene(norm)
         if scene_id is not None:
             scene = self._home.scene_map[scene_id]
@@ -116,8 +313,9 @@ class MockLanguageModel(LanguageModel):
                 "needs_clarification": False,
             }
 
-        # 3. Phản hồi nhu cầu & cảm giác sinh hoạt đời thường (Nóng, Lạnh, Tối, Sáng)
-        room = self._match_room(norm) or current_room
+        # -------------------------------------------------------
+        # 5. CẢM GIÁC SINH HOẠT ĐỜI THƯỜNG (Nóng, Lạnh, Sáng quá)
+        # -------------------------------------------------------
         if any(w in norm for w in ("nong qua", "nuc qua", "troi nong", "nong qua di")):
             ac = self._find_device_of_type(DeviceType.AIR_CONDITIONER, room)
             if ac:
@@ -138,16 +336,6 @@ class MockLanguageModel(LanguageModel):
                     "scene": None,
                     "needs_clarification": False,
                 }
-        if any(w in norm for w in ("toi qua", "sao toi the", "phong toi", "toi the")):
-            light = self._find_device_of_type(DeviceType.LIGHT, room)
-            if light:
-                cmds = self._set_light_comfort(light, brightness=100)
-                return {
-                    "speech": "Phòng hơi tối, để mình bật đèn sáng lên cho bạn nhé.",
-                    "commands": cmds,
-                    "scene": None,
-                    "needs_clarification": False,
-                }
         if any(w in norm for w in ("sang qua", "choi qua", "choi mat")):
             light = self._find_device_of_type(DeviceType.LIGHT, room)
             if light:
@@ -159,6 +347,35 @@ class MockLanguageModel(LanguageModel):
                     "needs_clarification": False,
                 }
 
+        # -------------------------------------------------------
+        # 6. LÀM RÕ KHI THIẾU PHÒNG (Ambiguity Disambiguation: "Bật đèn", "Tắt đèn")
+        # -------------------------------------------------------
+        has_room_in_text = self._match_room(norm) is not None
+        has_all_words = any(w in norm for w in _ALL_WORDS)
+        if not has_room_in_text and not has_all_words and self._has_action(norm):
+            words_in_norm = norm.split()
+            if any(w in ("den", "bong den") for w in words_in_norm):
+                is_off = any(w in norm for w in _OFF_WORDS)
+                action_text = "tắt" if is_off else "bật"
+                return {
+                    "speech": f"Ý bạn là đang muốn {action_text} đèn ở phòng nào ạ? Phòng khách hay phòng ngủ?",
+                    "commands": [],
+                    "scene": None,
+                    "needs_clarification": True,
+                }
+            if any(w in norm for w in ("dieu hoa", "may lanh")):
+                is_off = any(w in norm for w in _OFF_WORDS)
+                action_text = "tắt" if is_off else "bật"
+                return {
+                    "speech": f"Ý bạn là đang muốn {action_text} điều hòa ở phòng khách hay phòng ngủ ạ?",
+                    "commands": [],
+                    "scene": None,
+                    "needs_clarification": True,
+                }
+
+        # -------------------------------------------------------
+        # 7. KHỚP THIẾT BỊ VÀ THỰC THI LỆNH
+        # -------------------------------------------------------
         targets = self._match_devices(norm, room)
         if not targets:
             # "sáng hơn chút" names nothing: carry the subject over from the
@@ -440,21 +657,52 @@ class MockLanguageModel(LanguageModel):
             "needs_clarification": False,
         }
 
+    def _room_name(self, room_id: str) -> str:
+        room = self._home.room_map.get(room_id)
+        return room.name.lower() if room else room_id
+
     @staticmethod
     def _describe(targets: list[Device], commands: list[dict[str, Any]]) -> str:
         names = ", ".join(dict.fromkeys(d.name for d in targets))
         lock = next((c for c in commands if c["capability"] == "locked"), None)
         if lock is not None:
-            return f"Đã khóa {names}." if lock["value"] == "true" else f"Mình sẽ mở {names}."
+            return (
+                f"Dạ, mình đã khóa an toàn {names} rồi bạn nhé."
+                if lock["value"] == "true"
+                else f"Dạ, mình đã mở khóa {names} cho bạn rồi nhé."
+            )
         powered_off = any(
             c["capability"] in {"power", "state", "on", "open"}
             and str(c["value"]).lower() in {"off", "false", "closed", "đóng", "tắt"}
             for c in commands
         )
         if powered_off:
-            return f"Đã tắt {names}."
+            variations = [
+                f"Dạ được rồi, mình đã tắt {names} cho bạn rồi nhé.",
+                f"Mình vừa tắt {names} giúp bạn rồi đó nha.",
+                f"Xong rồi nè, {names} đã được tắt rồi bạn nhé.",
+                f"Đã tắt {names} giúp bạn rồi nha.",
+            ]
+            idx = sum(ord(c) for c in names) % len(variations)
+            return variations[idx]
+
         levels = [c for c in commands if c["capability"] not in {"power", "state", "on", "open"}]
         if levels:
+            bright = next((c["value"] for c in levels if c["capability"] == "brightness"), None)
+            if bright is not None:
+                return f"Dạ, mình đã chỉnh độ sáng {names} ở mức {bright}% rồi bạn nhé."
+            temp = next((c["value"] for c in levels if c["capability"] in ("temperature", "target_temperature", "setpoint")), None)
+            if temp is not None:
+                return f"Dạ, mình đã đặt nhiệt độ {names} ở {temp} độ cho bạn rồi nhé."
             detail = ", ".join(f"{c['capability']} {c['value']}" for c in levels[:2])
-            return f"Đã chỉnh {names}: {detail}."
-        return f"Đã bật {names}."
+            return f"Dạ, mình đã điều chỉnh {names}: {detail} cho bạn rồi nhé."
+
+        variations = [
+            f"Dạ được rồi, mình đã bật {names} cho bạn rồi nhé!",
+            f"Mình vừa bật {names} giúp bạn rồi đó nha.",
+            f"Xong rồi nè, {names} đã được bật lên rồi ạ.",
+            f"Dạ, {names} đã sẵn sàng hoạt động rồi bạn nhé!",
+        ]
+        idx = sum(ord(c) for c in names) % len(variations)
+        return variations[idx]
+

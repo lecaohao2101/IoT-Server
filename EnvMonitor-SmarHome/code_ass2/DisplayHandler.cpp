@@ -22,6 +22,18 @@ void initLCDs() {
   lcd_bed.print("AC Bedroom");
 }
 
+void updateLCDWiFiStatus(bool connected) {
+  // Chỉ ghi lại khi trạng thái đổi: LCD đi qua I2C, viết 16 ký tự mỗi giây là
+  // tự chuốc lấy nhấp nháy và chiếm bus của hai màn hình.
+  static int last_state = -1;
+  int state = connected ? 1 : 0;
+  if (state == last_state) return;
+  last_state = state;
+
+  lcd_lr.setCursor(0, 0);
+  lcd_lr.print(connected ? "AC LR    WiFi:OK" : "AC LR   WiFi:OFF");
+}
+
 void updateLCDLivingRoom(float temp, float hum, bool isDhtValid) {
   lcd_lr.setCursor(0, 1);
   char line2[17];

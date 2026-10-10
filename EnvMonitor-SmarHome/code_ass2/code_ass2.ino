@@ -5,6 +5,7 @@
 #include "Controls.h"
 #include "WiFiConfig.h"
 #include "StatusManager.h"
+#include <PubSubClient.h>
 #include "MqttHandler.h"
 
 unsigned long lastSensorRead = 0;
@@ -84,6 +85,12 @@ void loop() {
     }
 
     Serial.printf("INMP441 | Mức âm thanh: %d\n", soundLevel);
+
+    // Giữ Wi-Fi sống và cho LCD nói đúng sự thật. Dòng 0 của LCD phòng khách
+    // trước đây đứng nguyên thông báo lúc khởi động, nên "WiFi: Offline" vẫn
+    // nằm đó rất lâu sau khi mạng đã nối lại.
+    bool wifiOk = wifiEnsureConnected();
+    updateLCDWiFiStatus(wifiOk);
 
     // Cập nhật màn hình LCD tại chỗ (không gửi API HTTP)
     updateLCDLivingRoom(temp, hum, isDhtValid);

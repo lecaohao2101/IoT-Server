@@ -170,6 +170,7 @@ void setDeviceActuator(const String& deviceId, bool power, int value) {
   Serial.printf("[ACTUATOR] %s -> %s (val=%d)\n", deviceId.c_str(), power ? "ON" : "OFF", value);
   if (deviceId == "living_room_light") {
     digitalWrite(PIN_LED_LR_MAIN, power ? HIGH : LOW);
+    state_lr = power;
   } else if (deviceId == "living_room_sofa_light") {
     digitalWrite(PIN_LED_LR_SOFA, power ? HIGH : LOW);
   } else if (deviceId == "kitchen_light") {

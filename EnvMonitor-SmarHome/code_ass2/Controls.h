@@ -1,6 +1,8 @@
 #ifndef CONTROLS_H
 #define CONTROLS_H
 
+#include <Arduino.h>   // String, byte... dung trong header nay
+
 void initControls();
 void testBuzzerAndLEDs();
 void handleButtons();

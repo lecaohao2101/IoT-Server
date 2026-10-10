@@ -18,22 +18,27 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { DEFAULT_SETTINGS, loadSettings, saveSettings, ROOMS, type Settings } from './src/settings';
+import { DeviceControlView } from './src/ui/DeviceControlView';
+import { NavTabs, type ActiveTab } from './src/ui/NavTabs';
 import { SettingsModal } from './src/ui/SettingsModal';
 import { StatusBar as ConnectionBar } from './src/ui/StatusBar';
 import { TalkButton } from './src/ui/TalkButton';
 import { Transcript } from './src/ui/Transcript';
 import { colors, radius, spacing } from './src/ui/theme';
+import { useDeviceManager } from './src/useDeviceManager';
 import { useVoiceSession } from './src/useVoiceSession';
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('voice');
 
   useEffect(() => {
     loadSettings().then(setSettings);
   }, []);
 
   const session = useVoiceSession(settings);
+  const deviceManager = useDeviceManager(settings);
 
   if (!settings) {
     return (
@@ -64,31 +69,56 @@ export default function App() {
           onClear={session.clear}
         />
 
-        {session.error && (
-          <Pressable onPress={session.dismissError} style={styles.error}>
-            <Text style={styles.errorText}>{session.error}</Text>
-            <Text style={styles.errorHint}>Chạm để ẩn</Text>
-          </Pressable>
-        )}
-
-        {session.state === 'offline' && !session.error && (
-          <Pressable onPress={session.connect} style={styles.retry}>
-            <Text style={styles.retryText}>Chạm để kết nối lại</Text>
-          </Pressable>
-        )}
-
-        <View style={styles.body}>
-          <Transcript messages={session.messages} partial={session.partial} />
-        </View>
-
-        <TalkButton
-          recording={session.recording}
-          speaking={session.speaking}
-          enabled={session.state === 'ready'}
-          level={session.level}
-          onPressIn={() => void session.startTalking()}
-          onPressOut={() => void session.stopTalking()}
+        {/* Tab chuyển đổi giữa Giọng nói và Giám sát/Điều khiển MQTT */}
+        <NavTabs
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          onDeviceCount={deviceManager.counts.onCount}
         />
+
+        {activeTab === 'voice' ? (
+          <>
+            {session.error && (
+              <Pressable onPress={session.dismissError} style={styles.error}>
+                <Text style={styles.errorText}>{session.error}</Text>
+                <Text style={styles.errorHint}>Chạm để ẩn</Text>
+              </Pressable>
+            )}
+
+            {session.state === 'offline' && !session.error && (
+              <Pressable onPress={session.connect} style={styles.retry}>
+                <Text style={styles.retryText}>Chạm để kết nối lại</Text>
+              </Pressable>
+            )}
+
+            <View style={styles.body}>
+              <Transcript messages={session.messages} partial={session.partial} />
+            </View>
+
+            <TalkButton
+              recording={session.recording}
+              speaking={session.speaking}
+              enabled={session.state === 'ready'}
+              level={session.level}
+              onPressIn={() => void session.startTalking()}
+              onPressOut={() => void session.stopTalking()}
+            />
+          </>
+        ) : (
+          <DeviceControlView
+            devices={deviceManager.devices}
+            counts={deviceManager.counts}
+            mqttStatus={deviceManager.mqttStatus}
+            lastMessage={deviceManager.lastActionMessage}
+            refreshing={deviceManager.refreshing}
+            onRefresh={deviceManager.refresh}
+            onToggleDevice={deviceManager.toggleDevice}
+            onSetCapability={deviceManager.setCapability}
+            onTurnOffAllLights={deviceManager.turnOffAllLights}
+            onDismissMessage={deviceManager.dismissMessage}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
 
         <SettingsModal
           visible={settingsOpen}
