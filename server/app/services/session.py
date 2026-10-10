@@ -64,6 +64,8 @@ class VoiceSession(TurnSink):
         self._client_channels = 1
         self._reply_encoding = AudioEncoding.PCM16
         self._client_wants_audio = True
+        self._emit_encoding: AudioEncoding | None = None
+        self._emit_rate = settings.audio_sample_rate
 
         self._fmt = AudioFormat(sample_rate=settings.audio_sample_rate)
         self._endpointer = SilenceEndpointer(
@@ -88,6 +90,11 @@ class VoiceSession(TurnSink):
         return self._cancelled or self._closed
 
     @property
+    def _hub_is_listening(self) -> bool:
+        """True when a speaker on the network is pulling audio from the hub."""
+        return bool(self._audio_hub and self._audio_hub.active_subscribers_count > 0)
+
+    @property
     def _speak(self) -> bool:
         """Whether this turn is worth synthesising at all.
 
@@ -96,14 +103,30 @@ class VoiceSession(TurnSink):
         board, which pulls from the audio hub. Tying synthesis to this socket's
         encoding would leave that speaker silent for every spoken command.
         """
-        if self._client_wants_audio:
-            return True
-        return bool(self._audio_hub and self._audio_hub.active_subscribers_count > 0)
+        return self._client_wants_audio or self._hub_is_listening
+
+    @property
+    def _turn_encoding(self) -> AudioEncoding:
+        """The codec to synthesise this turn in.
+
+        The hub mixes raw PCM16 for the speakers on the network, so a compressed
+        reply cannot reach them. When a speaker is listening the turn is
+        synthesised as PCM16 and the same bytes serve both ends -- one synthesis,
+        no transcoding. With nobody listening the client keeps the codec it asked
+        for, which on mobile data is usually mp3.
+        """
+        if self._hub_is_listening:
+            return AudioEncoding.PCM16
+        return self._reply_encoding
 
     async def assistant_delta(self, text: str) -> None:
         await self._send(proto.assistant_delta(text))
 
     async def audio_start(self, encoding: AudioEncoding, sample_rate: int) -> None:
+        # Remember what is actually being emitted: the hub may only have PCM16,
+        # and the rate comes from the synthesiser rather than our canonical one.
+        self._emit_encoding = encoding
+        self._emit_rate = sample_rate
         if self._client_wants_audio:
             await self._send(proto.tts_start(encoding.value, sample_rate))
 
@@ -112,8 +135,10 @@ class VoiceSession(TurnSink):
             return
         if self._client_wants_audio:
             await self._send_bytes(payload)
-        if self._audio_hub:
-            await self._audio_hub.broadcast_chunk(payload, src_rate=self._fmt.sample_rate)
+        if self._audio_hub and self._emit_encoding is AudioEncoding.PCM16:
+            # Guarded on purpose: the hub resamples its input as raw PCM16, so
+            # handing it mp3 frames would play as noise on every speaker.
+            await self._audio_hub.broadcast_chunk(payload, src_rate=self._emit_rate)
 
     async def audio_end(self) -> None:
         if self._client_wants_audio:
@@ -403,7 +428,7 @@ class VoiceSession(TurnSink):
                 room=self.room,
                 sink=self,
                 speak=speak,
-                encoding=self._reply_encoding,
+                encoding=self._turn_encoding,
                 sample_rate=self._s.audio_sample_rate,
             )
         except asyncio.CancelledError:
