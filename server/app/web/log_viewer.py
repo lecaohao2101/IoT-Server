@@ -64,6 +64,13 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
   .lvl { font-size:11px; font-weight:700; letter-spacing:.3px; }
   .lvl.INFO{color:var(--muted);} .lvl.WARNING{color:var(--amber);}
   .lvl.ERROR,.lvl.CRITICAL{color:var(--red);} .lvl.DEBUG{color:#71717a;}
+  .src-badge {
+    font-size:10px; font-weight:700; border-radius:4px; padding:1px 5px;
+    font-family:ui-monospace,Consolas,monospace; letter-spacing:.2px;
+  }
+  .src-badge.mobile { background:rgba(56,189,248,0.18); color:var(--accent); border:1px solid rgba(56,189,248,0.4); }
+  .src-badge.device { background:rgba(245,158,11,0.18); color:var(--amber); border:1px solid rgba(245,158,11,0.4); }
+  .src-badge.system { background:rgba(148,163,184,0.12); color:var(--muted); border:1px solid rgba(148,163,184,0.3); }
   .lg { color:var(--violet); font-size:12px; font-family:ui-monospace,Consolas,monospace; }
   .msg { font-weight:600; }
   .tid { color:var(--muted); font-size:11px; font-family:ui-monospace,Consolas,monospace; margin-left:auto; }
@@ -97,6 +104,11 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
   </div>
   <div class="row">
     <input type="text" id="q" placeholder="Lọc theo chữ: stt, tts, esp32_master, lỗi...">
+    <select id="src">
+      <option value="all">Tất cả nguồn (All)</option>
+      <option value="mobile">📱 Ứng dụng di động (Mobile)</option>
+      <option value="device">⚡ Thiết bị / ESP32 (Device)</option>
+    </select>
     <select id="lvl">
       <option value="0">Mọi mức</option>
       <option value="20">INFO trở lên</option>
@@ -140,6 +152,50 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
     $("status").appendChild(document.createTextNode(text));
   };
 
+  const sessionTypes = new Map();
+
+  function classify(r) {
+    const f = r.fields || {};
+    const sid = f.session_id || (r.trace_id && r.trace_id.startsWith("sess_") ? r.trace_id : null);
+
+    if (r.msg === "voice session opened") {
+      const isDev = Boolean(f.device_id || (typeof f.principal === "string" && f.principal.includes("kind='device'")));
+      const cat = isDev ? "device" : "mobile";
+      if (sid) sessionTypes.set(sid, cat);
+      return cat;
+    }
+
+    if (
+      r.logger.startsWith("app.mqtt") ||
+      r.logger.startsWith("app.api.routes_hardware") ||
+      (f.path && (f.path === "/update-status" || f.path === "/poll-commands" || f.path === "/upload-audio" || f.path.startsWith("/api/audio/stream"))) ||
+      (f.device_id && String(f.device_id).startsWith("esp32")) ||
+      sid === "esp32_hardware" ||
+      (typeof f.principal === "string" && f.principal.includes("kind='device'"))
+    ) {
+      if (sid) sessionTypes.set(sid, "device");
+      return "device";
+    }
+
+    if (sid && sessionTypes.has(sid)) {
+      return sessionTypes.get(sid);
+    }
+
+    if (
+      sid ||
+      r.logger.startsWith("app.services.session") ||
+      r.logger.startsWith("app.services.orchestrator") ||
+      r.logger.startsWith("app.ai.") ||
+      (f.path && (f.path.startsWith("/api/v1/chat") || f.path.startsWith("/api/v1/commands") || f.path.startsWith("/api/v1/devices") || f.path.startsWith("/voice-demo"))) ||
+      /voice|stt|tts|transcript|turn complete/i.test(r.msg)
+    ) {
+      if (sid) sessionTypes.set(sid, "mobile");
+      return "mobile";
+    }
+
+    return "system";
+  }
+
   function isNoise(r) {
     if (r.logger === "uvicorn.access") return true;
     if (r.msg === "http request" && NOISE_PATHS.includes(r.fields.path)) return true;
@@ -150,6 +206,10 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
   function visible(r) {
     if ($("noise").checked && isNoise(r)) return false;
     if ($("only").checked && !PIPELINE.test(r.msg + " " + r.logger)) return false;
+    const src = $("src").value;
+    const cat = classify(r);
+    if (src === "mobile" && cat !== "mobile") return false;
+    if (src === "device" && cat !== "device") return false;
     const min = parseInt($("lvl").value, 10);
     const n = {DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50}[r.level] || 20;
     if (n < min) return false;
@@ -195,6 +255,12 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
     lvl.className = "lvl " + r.level;
     lvl.textContent = r.level;
     head.appendChild(lvl);
+
+    const cat = classify(r);
+    const badge = document.createElement("span");
+    badge.className = "src-badge " + cat;
+    badge.textContent = cat === "mobile" ? "📱 mobile" : cat === "device" ? "⚡ device" : "⚙️ system";
+    head.appendChild(badge);
 
     const lg = document.createElement("span");
     lg.className = "lg";
@@ -289,9 +355,14 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
     if (paused) setStatus("", "đã dừng · " + records.length + " bản ghi");
   };
   $("clear").onclick = () => { records = []; redraw(); };
-  ["q", "lvl", "noise", "only"].forEach((id) => {
+  ["q", "lvl", "noise", "only", "src"].forEach((id) => {
     $(id).addEventListener("input", redraw);
     $(id).addEventListener("change", redraw);
+  });
+
+  $("src").value = localStorage.getItem("logSrc") || "all";
+  $("src").addEventListener("change", () => {
+    localStorage.setItem("logSrc", $("src").value);
   });
 
   $("key").value = localStorage.getItem("logKey") || "";
