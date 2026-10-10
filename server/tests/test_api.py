@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+import shutil
+import subprocess
 import time
 
 import pytest
@@ -285,6 +288,12 @@ def test_log_viewer_page_is_served_without_a_key(secured_client: TestClient):
     assert page.status_code == 200
     assert "text/html" in page.headers["content-type"]
     assert "s3cret" not in page.text
+
+    script = re.search(r"<script>(.*?)</script>", page.text, re.DOTALL)
+    assert script is not None
+    if shutil.which("node"):
+        res = subprocess.run(["node", "--check"], input=script.group(1), text=True, capture_output=True)
+        assert res.returncode == 0, res.stderr
 
 
 def test_the_log_feed_needs_a_credential(secured_client: TestClient):

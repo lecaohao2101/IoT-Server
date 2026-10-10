@@ -241,7 +241,7 @@ LOG_VIEWER_HTML = """<!DOCTYPE html>
     if (!shown.length) {
       empty.textContent = records.length
         ? "Có " + records.length + " bản ghi nhưng bộ lọc đang giấu hết."
-        : "Chưa có bản ghi nào. Hãy thử nói với thiết bị, hoặc bỏ dấu \"Ẩn nhiễu\".";
+        : 'Chưa có bản ghi nào. Hãy thử nói với thiết bị, hoặc bỏ dấu "Ẩn nhiễu".';
     }
     if ($("tail").checked) window.scrollTo(0, document.body.scrollHeight);
   }
