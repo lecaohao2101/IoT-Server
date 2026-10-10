@@ -142,44 +142,67 @@ void connectAudioStream() {
   const char* host = USE_CLOUD ? CLOUD_HOST : LOCAL_HOST;
   int port = USE_CLOUD ? CLOUD_PORT : LOCAL_PORT;
 
-  Serial.printf("[STREAM] Free Heap: %d bytes | Đang kết nối luồng Audio TTS tới %s:%d...\n", 
+  Serial.printf("[STREAM] Free Heap: %d bytes | Dang ket noi luong Audio TTS toi %s:%d...\n",
                 ESP.getFreeHeap(), host, port);
 
-  if (client.connect(host, port)) {
-    // Yêu cầu luồng âm thanh 44.1kHz Stereo (tương thích trực tiếp chuẩn A2DP Bluetooth)
-    String request = String("GET /api/audio/stream?rate=44100&channels=2 HTTP/1.1\r\n") +
-                     "Host: " + String(host) + "\r\n" +
-                     "User-Agent: ESP32-A2DP-Speaker\r\n" +
-                     "Accept: application/octet-stream\r\n" +
-                     "Connection: keep-alive\r\n\r\n";
-    client.print(request);
-
-    // Bỏ qua HTTP Response Headers
-    unsigned long timeout = millis();
-    while (client.connected() && millis() - timeout < 4000) {
-      if (client.available()) {
-        String line = client.readStringUntil('\n');
-        if (line == "\r" || line == "") {
-          is_stream_connected = true;
-          Serial.println("[STREAM] ===> KẾT NỐI LUỒNG AUDIO SERVER THÀNH CÔNG! Sẵn sàng phát tiếng Trợ lý AI.");
-          break;
-        }
-      }
-    }
-  } else {
+  if (!client.connect(host, port)) {
     is_stream_connected = false;
     size_t heap = ESP.getFreeHeap();
     if (heap < 20000) {
-      // Mở một TCP socket cần vài KB liền kề. Dưới ngưỡng này thì không phải
-      // mạng hỏng mà là hết RAM -- hai lỗi cần sửa theo hai hướng khác hẳn nhau.
-      Serial.printf("[STREAM] Kết nối thất bại vì HẾT RAM (%u bytes). Mạng không phải thủ phạm.
-",
+      // Mo mot TCP socket can vai KB lien ke. Duoi nguong nay thi khong phai
+      // mang hong ma la het RAM -- hai loi can sua theo hai huong khac han nhau.
+      Serial.printf("[STREAM] Ket noi that bai vi HET RAM (%u bytes). Mang khong phai thu pham.\n",
                     (unsigned)heap);
     } else {
-      Serial.println("[STREAM] Kết nối Server thất bại, sẽ thử lại sau 5s...");
+      Serial.println("[STREAM] Ket noi Server that bai, se thu lai sau 5s...");
+    }
+    return;
+  }
+
+  // HTTP/1.0 la co y, khong phai so suat. Voi HTTP/1.1 server tra ve
+  // "transfer-encoding: chunked", tuc moi khoi am thanh bi boc trong
+  // "<hex do dai>\r\n <du lieu> \r\n". Vong doc o loop() do thang byte vao ring
+  // buffer PCM, nen may byte khung do se bi phat ra nhu mau am thanh va lam lech
+  // can le 16-bit -- tieng noi bien thanh rac. HTTP/1.0 khong co chunked.
+  String request = String("GET /api/audio/stream?rate=44100&channels=2 HTTP/1.0\r\n") +
+                   "Host: " + String(host) + "\r\n" +
+                   "User-Agent: ESP32-A2DP-Speaker\r\n" +
+                   "Accept: application/octet-stream\r\n\r\n";
+  client.print(request);
+
+  bool chunked = false;
+  unsigned long timeout = millis();
+  while (client.connected() && millis() - timeout < 4000) {
+    if (!client.available()) continue;
+
+    String line = client.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() == 0) {           // dong trong = het header
+      if (chunked) {
+        // Tha ngat con hon phat tieng rac roi di do nguyen nhan o phia loa.
+        Serial.println("[STREAM] LOI: server tra chunked encoding, byte khung se lan vao PCM.");
+        Serial.println("[STREAM] Yeu cau phai la HTTP/1.0. Ngat ket noi.");
+        client.stop();
+        is_stream_connected = false;
+        return;
+      }
+      is_stream_connected = true;
+      Serial.println("[STREAM] ===> KET NOI LUONG AUDIO THANH CONG! San sang phat tieng Tro ly AI.");
+      return;
+    }
+
+    String lower = line;
+    lower.toLowerCase();
+    if (lower.startsWith("transfer-encoding:") && lower.indexOf("chunked") >= 0) {
+      chunked = true;
     }
   }
+
+  Serial.println("[STREAM] Het thoi gian cho header phan hoi.");
+  is_stream_connected = false;
 }
+
 
 // ============================================================================
 // 5. GIAO DIỆN WEB QUẢN TRỊ & THỬ NGHIỆM
@@ -326,8 +349,7 @@ void setup() {
   // tạo, nếu không heap còn ~8 KB sau khi ghép loa và không mở nổi một TCP socket.
   size_t heap_before = ESP.getFreeHeap();
   esp_err_t released = esp_bt_controller_mem_release(ESP_BT_MODE_BLE);
-  Serial.printf("[A2DP] Trả lại RAM của BLE: %s | Heap %u -> %u bytes
-",
+  Serial.printf("[A2DP] Trả lại RAM của BLE: %s | Heap %u -> %u bytes\n",
                 released == ESP_OK ? "OK" : "bỏ qua",
                 (unsigned)heap_before, (unsigned)ESP.getFreeHeap());
 
