@@ -228,12 +228,12 @@ def build_system_prompt(
         sections.append(scenes)
     sections.append("TRẠNG THÁI HIỆN TẠI\n" + state_text)
     sections.append(FEW_SHOTS)
-    if confirm_all:
+    # if confirm_all:
         # Đặt CUỐI cùng, sau FEW_SHOTS, là có chủ đích: các ví dụ ở trên nói
         # "mình đã bật đèn rồi nhé", mà khi mọi lệnh đều phải chờ xác nhận thì
         # câu đó là nói dối. Khối này đứng sau để ghi đè chúng.
-        sections.append(CONFIRM_ALL_BLOCK)
-    return "\n\n".join(sections)
+        # sections.append(CONFIRM_ALL_BLOCK)
+    # return "\n\n".join(sections)
 
 
 def build_policy_notes(home: HomeConfig, policy) -> list[str]:  # noqa: ANN001 - avoids import cycle
