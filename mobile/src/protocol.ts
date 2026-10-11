@@ -51,7 +51,18 @@ export type CommandPlan = {
 };
 
 export type ServerFrame =
-  | { type: 'session.ready'; ts: string; session_id: string; room: string | null; sample_rate: number }
+  | {
+      type: 'session.ready';
+      ts: string;
+      session_id: string;
+      room: string | null;
+      sample_rate: number;
+      /** Tên phải gọi trước khi ra lệnh. Server là nguồn sự thật, app không tự đặt. */
+      assistant_name?: string;
+      wake_word_required?: boolean;
+      wake_follow_up_s?: number;
+      voice_enrollment_required?: boolean;
+    }
   | { type: 'stt.partial'; ts: string; text: string }
   | { type: 'stt.final'; ts: string; text: string; confidence: number }
   | { type: 'assistant.delta'; ts: string; text: string }
@@ -66,6 +77,19 @@ export type ServerFrame =
   | { type: 'tts.start'; ts: string; encoding: string; sample_rate: number }
   | { type: 'tts.end'; ts: string }
   | { type: 'state.changed'; ts: string; device_id: string; state: Record<string, unknown>; online: boolean }
+  // Câu vừa nói không gọi tên trợ lý nên server bỏ qua, không trả lời gì cả.
+  // Cố tình KHÔNG phải `notice`: trên app, notice hiện banner lỗi đỏ, mà người
+  // dùng quên gọi tên thì không phải là lỗi.
+  | { type: 'wake.required'; ts: string; assistant_name: string; heard: string }
+  // Đã gọi đúng tên: cuộc trò chuyện mở, câu kế tiếp trong `follow_up_s` giây
+  // không cần gọi lại tên nữa.
+  | {
+      type: 'wake.active';
+      ts: string;
+      assistant_name: string;
+      session_id: string;
+      follow_up_s: number;
+    }
   | { type: 'notice'; ts: string; code: string; message: string }
   | { type: 'error'; ts: string; code: string; message: string }
   | { type: 'cancelled'; ts: string }

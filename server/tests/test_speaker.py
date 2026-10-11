@@ -223,7 +223,7 @@ async def test_websocket_rejects_unauthorized_speaker_when_enabled(container, tm
         settings=container.settings,
         bus=container.bus,
         principal=None,
-        speaker_manager=mgr,
+        voice_gate=container.voice_gate,
     )
 
     # Feed audio from unregistered Person D (320 Hz)
@@ -234,7 +234,7 @@ async def test_websocket_rejects_unauthorized_speaker_when_enabled(container, tm
     # Mock recognizer transcript
     class MockResult:
         is_final = True
-        text = "bật đèn phòng khách"
+        text = "Anh Thạc Sĩ, bật đèn phòng khách"
         confidence = 0.95
         speech_ended = True
 
@@ -256,3 +256,105 @@ async def test_websocket_rejects_unauthorized_speaker_when_enabled(container, tm
     assert "không nhận diện được giọng nói" in final_frame["text"]
     assert final_frame.get("plan") is None
     assert final_frame.get("error") == "unauthorized_speaker"
+
+
+# ------------------------------------------------------------ Enrollment plan
+def test_enrollment_plan_tells_the_app_what_to_put_on_screen(client: TestClient):
+    """The app shows these sentences; it must not carry its own copy of them.
+
+    The phrases are named after the assistant, so renaming the apartment's
+    assistant renames what new users are asked to read -- in one place.
+    """
+    plan = client.get("/api/v1/speakers/enrollment").json()
+
+    assert plan["assistant_name"] == "Anh Thạc Sĩ"
+    assert plan["required_samples"] >= 1
+    assert len(plan["phrases"]) == plan["required_samples"]
+    assert [p["index"] for p in plan["phrases"]] == list(range(plan["required_samples"]))
+    assert all("Anh Thạc Sĩ" in p["text"] for p in plan["phrases"])
+    # Getting the format wrong produces a profile that silently never matches.
+    assert (plan["sample_rate"], plan["channels"], plan["encoding"]) == (16000, 1, "pcm16")
+    assert plan["satisfied"] is False
+
+
+def test_enrollment_plan_tracks_one_speaker_through_its_samples(client: TestClient):
+    pcm = _gen_synthetic_pcm(150.0, [1.0, 0.8, 0.6, 0.4])
+    audio = base64.b64encode(pcm).decode()
+
+    required = client.get("/api/v1/speakers/enrollment").json()["required_samples"]
+    for index in range(required):
+        res = client.post(
+            "/api/v1/speakers/enroll",
+            json={
+                "speaker_id": "new_user",
+                "name": "Người Mới",
+                "role": "owner",
+                "audio_base64": audio,
+                "phrase_index": index,
+            },
+        )
+        assert res.status_code == 201
+        summary = res.json()
+        assert summary["samples_count"] == index + 1
+        assert summary["complete"] is (index + 1 >= required)
+        assert summary["remaining_samples"] == max(0, required - index - 1)
+
+    plan = client.get("/api/v1/speakers/enrollment", params={"speaker_id": "new_user"}).json()
+    assert plan["satisfied"] is True
+    assert plan["completed_samples"] == required
+
+
+def test_an_unknown_speaker_id_is_simply_not_satisfied(client: TestClient):
+    plan = client.get("/api/v1/speakers/enrollment", params={"speaker_id": "nobody"}).json()
+    assert plan["satisfied"] is False
+    assert plan["completed_samples"] == 0
+
+
+def test_system_info_states_which_name_the_server_listens_for(client: TestClient):
+    """`.env` can lie about this; the running server cannot."""
+    info = client.get("/api/v1/system/info").json()
+
+    assert info["assistant"]["name"] == "Anh Thạc Sĩ"
+    assert info["assistant"]["wake_word_enabled"] is True
+    assert "thac si" in info["assistant"]["wake_word_aliases"]
+    assert info["voice_biometrics"]["required_samples"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_the_fingerprint_measures_raw_audio_not_the_denoised_stream(container):
+    """Enrollment and verification have to see the same signal.
+
+    The app enrolls raw PCM over REST. The socket denoises before recognition --
+    a high-pass plus an energy gate -- and measuring the fingerprint downstream
+    of that compares a profile built one way against an utterance measured
+    another. The symptom is the worst kind: the owner registers successfully and
+    is then ignored, with every number in the log looking reasonable.
+    """
+    from app.api import ws_protocol as proto
+    from app.core.audio import denoise_pcm16
+
+    class _NullSocket:
+        async def send_json(self, payload): ...
+        async def send_bytes(self, payload): ...
+
+    session = VoiceSession(
+        _NullSocket(),
+        orchestrator=container.orchestrator,
+        recognizer=container.stt,
+        settings=container.settings,
+        bus=container.bus,
+        principal=None,
+        voice_gate=container.voice_gate,
+    )
+    pcm = _gen_synthetic_pcm(130.0, [1.0, 0.8, 0.6, 0.4])
+    assert denoise_pcm16(pcm) != pcm, "denoise is a no-op here, the test proves nothing"
+
+    try:
+        await session._on_hello(proto.HelloMessage(type="hello", reply_encoding="none"))
+        await session._on_audio(pcm)
+        kept = b"".join(session._utterance_frames)
+    finally:
+        await session.close()
+
+    assert kept == pcm, "the voice gate would fingerprint the denoised signal"
+

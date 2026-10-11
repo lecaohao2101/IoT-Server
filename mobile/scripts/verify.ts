@@ -290,5 +290,56 @@ test('uint8ArrayToBase64 mã hoá base64 chuẩn xác tương đương Buffer', 
   assert.equal(uint8ArrayToBase64(single), Buffer.from(single).toString('base64'));
 });
 
+// ------------------------------------------------- Từ khoá đánh thức & đăng ký giọng
+test('máy chưa đăng ký giọng thì mặc định không có speakerId -> app chặn ở màn đăng ký', () => {
+  assert.equal(DEFAULT_SETTINGS.speakerId, '');
+  assert.equal(DEFAULT_SETTINGS.speakerName, '');
+});
+
+test('session.ready mang tên trợ lý để app không phải tự đoán', () => {
+  const frame = parseServerFrame(
+    JSON.stringify({
+      type: 'session.ready',
+      ts: '2026-01-01T00:00:00Z',
+      session_id: 's1',
+      room: 'living_room',
+      sample_rate: 16000,
+      assistant_name: 'Anh Thạc Sĩ',
+      wake_word_required: true,
+      wake_follow_up_s: 30,
+    })
+  );
+  assert.ok(frame && frame.type === 'session.ready');
+  assert.equal(frame.assistant_name, 'Anh Thạc Sĩ');
+  assert.equal(frame.wake_word_required, true);
+});
+
+test('wake.required đọc được, và KHÔNG phải notice nên app không hiện banner lỗi', () => {
+  const frame = parseServerFrame(
+    JSON.stringify({
+      type: 'wake.required',
+      ts: '2026-01-01T00:00:00Z',
+      assistant_name: 'Anh Thạc Sĩ',
+      heard: 'bật đèn phòng khách',
+    })
+  );
+  assert.ok(frame && frame.type === 'wake.required');
+  assert.equal(frame.assistant_name, 'Anh Thạc Sĩ');
+});
+
+test('wake.active mang độ dài cửa sổ trò chuyện do server quyết định', () => {
+  const frame = parseServerFrame(
+    JSON.stringify({
+      type: 'wake.active',
+      ts: '2026-01-01T00:00:00Z',
+      assistant_name: 'Anh Thạc Sĩ',
+      session_id: 's1',
+      follow_up_s: 30,
+    })
+  );
+  assert.ok(frame && frame.type === 'wake.active');
+  assert.equal(frame.follow_up_s, 30);
+});
+
 console.log(`\n${passed} đạt, ${failed} lỗi`);
 process.exit(failed === 0 ? 0 : 1);

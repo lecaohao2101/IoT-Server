@@ -109,6 +109,33 @@ thẳng ra `.wav` sẽ cho ra file hỏng. [`src/speechQueue.ts`](src/speechQueu
 Nhấn nút khi trợ lý đang nói sẽ dừng phát ngay tại máy **và** gửi `cancel` lên
 server để nó bỏ dở lượt đang chạy — không phải chờ TTS xả hết.
 
+### Đăng ký giọng nói — màn hình đầu tiên, không có đường vòng
+Căn hộ chỉ nhận lệnh từ giọng nói đã đăng ký, nên khi máy chưa có `speakerId`,
+[`src/ui/VoiceEnrollment.tsx`](src/ui/VoiceEnrollment.tsx) **chiếm trọn app**: nhập
+tên, rồi đọc lần lượt các câu mẫu, mỗi câu một lần giữ nút.
+
+Các câu đó **do server cấp** qua `GET /api/v1/speakers/enrollment`, app không giữ
+bản sao: chúng mang tên trợ lý, nên đổi `ASSISTANT_NAME` ở server là đổi luôn nội
+dung người dùng phải đọc, không cần phát hành lại app. Chúng cũng đều bắt đầu bằng
+tên đó — đăng ký là lúc duy nhất chắc chắn người dùng đang đọc hướng dẫn, nên cũng
+là lúc họ học được phải gọi căn hộ bằng tên gì.
+
+Bỏ dở giữa chừng thì lần mở sau đọc tiếp câu còn thiếu, không bắt làm lại từ đầu.
+Lối thoát duy nhất khỏi màn hình này là nút **Cài đặt**: không gọi được server thì
+không đăng ký được, mà khoá chết người dùng trong màn hình đăng ký mới là lỗi.
+
+### Gọi tên trước khi ra lệnh
+Server chỉ trả lời khi được gọi đúng tên (mặc định "Anh Thạc Sĩ"), kể cả khi người
+dùng đang giữ nút nói. App **không viết cứng cái tên đó** — nó đọc từ `session.ready`
+và hiển thị ngay trên nút nói, vì giữ nút rồi quên gọi tên là lỗi dễ mắc nhất, và
+người dùng chỉ biết mình quên sau khi trợ lý im lặng.
+
+| Khung server gửi | App làm gì |
+|---|---|
+| `session.ready.assistant_name` | Hiện "Nhớ gọi *tên* trước khi ra lệnh" dưới nút nói |
+| `wake.required` | Gợi ý màu vàng kèm **ví dụ cụ thể**, không phải banner lỗi đỏ — quên gọi tên không phải là lỗi của người dùng |
+| `wake.active` | Đổi nhãn thành "Đang trò chuyện — chưa cần gọi lại", tự tắt khi hết `follow_up_s` giây |
+
 ---
 
 ## Cấu trúc

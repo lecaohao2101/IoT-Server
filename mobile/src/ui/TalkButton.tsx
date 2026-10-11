@@ -9,11 +9,26 @@ type Props = {
   enabled: boolean;
   /** Microphone peak, 0..1 -- drives the ring so the user can see it listening. */
   level: number;
+  /** Tên phải gọi trước khi ra lệnh; null khi server chưa cho biết. */
+  assistantName?: string | null;
+  wakeWordRequired?: boolean;
+  /** Đang trong cửa sổ trò chuyện: câu tiếp theo không cần gọi tên nữa. */
+  conversationOpen?: boolean;
   onPressIn: () => void;
   onPressOut: () => void;
 };
 
-export function TalkButton({ recording, speaking, enabled, level, onPressIn, onPressOut }: Props) {
+export function TalkButton({
+  recording,
+  speaking,
+  enabled,
+  level,
+  assistantName,
+  wakeWordRequired,
+  conversationOpen,
+  onPressIn,
+  onPressOut,
+}: Props) {
   const ring = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -29,6 +44,15 @@ export function TalkButton({ recording, speaking, enabled, level, onPressIn, onP
   const scale = ring.interpolate({ inputRange: [0, 1], outputRange: [1, 1.45] });
   const opacity = ring.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.45] });
 
+  // Nhắc tên ngay trên nút: giữ nút rồi ra lệnh mà quên gọi tên là lỗi dễ mắc
+  // nhất, và người dùng chỉ biết mình quên sau khi trợ lý im lặng.
+  const wakeHint =
+    wakeWordRequired && assistantName
+      ? conversationOpen
+        ? `Đang trò chuyện — chưa cần gọi lại “${assistantName}”`
+        : `Nhớ gọi “${assistantName}” trước khi ra lệnh`
+      : null;
+
   const caption = !enabled
     ? 'Chưa kết nối server'
     : recording
@@ -40,6 +64,9 @@ export function TalkButton({ recording, speaking, enabled, level, onPressIn, onP
   return (
     <View style={styles.wrap}>
       <Text style={styles.caption}>{caption}</Text>
+      {wakeHint && (
+        <Text style={[styles.wakeHint, conversationOpen && styles.wakeHintOpen]}>{wakeHint}</Text>
+      )}
       <View style={styles.buttonArea}>
         <Animated.View
           pointerEvents="none"
@@ -76,6 +103,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   caption: { color: colors.textMuted, fontSize: 13 },
+  wakeHint: { color: colors.accent, fontSize: 12, fontWeight: '600', marginTop: -spacing.sm },
+  wakeHintOpen: { color: colors.ok },
   buttonArea: { width: SIZE * 1.6, height: SIZE, alignItems: 'center', justifyContent: 'center' },
   ring: {
     position: 'absolute',

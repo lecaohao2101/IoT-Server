@@ -24,6 +24,7 @@ import { SettingsModal } from './src/ui/SettingsModal';
 import { StatusBar as ConnectionBar } from './src/ui/StatusBar';
 import { TalkButton } from './src/ui/TalkButton';
 import { Transcript } from './src/ui/Transcript';
+import { VoiceEnrollment } from './src/ui/VoiceEnrollment';
 import { VoiceUsersView } from './src/ui/VoiceUsersView';
 import { colors, radius, spacing } from './src/ui/theme';
 import { useDeviceManager } from './src/useDeviceManager';
@@ -57,6 +58,37 @@ export default function App() {
     setSettingsOpen(false);
   };
 
+  // Máy này chưa có hồ sơ giọng nói nào -> chưa dùng được gì cả. Căn hộ chỉ nghe
+  // lời người đã đăng ký, nên để người dùng vào thẳng màn hình ra lệnh chỉ dẫn
+  // tới một trợ lý im lặng mà không nói vì sao.
+  if (!settings.speakerId) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.screen}>
+          <StatusBar style="light" />
+          <VoiceEnrollment
+            settings={settings}
+            capturingClip={session.capturingClip}
+            level={session.level}
+            startCaptureClip={session.startCaptureClip}
+            stopCaptureClip={session.stopCaptureClip}
+            cancelCaptureClip={session.cancelCaptureClip}
+            onDone={(speakerId, speakerName) =>
+              persist({ ...settings, speakerId, speakerName })
+            }
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+          <SettingsModal
+            visible={settingsOpen}
+            settings={settings}
+            onClose={() => setSettingsOpen(false)}
+            onSave={persist}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={styles.screen}>
@@ -86,6 +118,12 @@ export default function App() {
               </Pressable>
             )}
 
+            {session.hint && (
+              <Pressable onPress={session.dismissHint} style={styles.hint}>
+                <Text style={styles.hintText}>💡 {session.hint}</Text>
+              </Pressable>
+            )}
+
             {session.state === 'offline' && !session.error && (
               <Pressable onPress={session.connect} style={styles.retry}>
                 <Text style={styles.retryText}>Chạm để kết nối lại</Text>
@@ -101,6 +139,9 @@ export default function App() {
               speaking={session.speaking}
               enabled={session.state === 'ready'}
               level={session.level}
+              assistantName={session.assistantName}
+              wakeWordRequired={session.wakeWordRequired}
+              conversationOpen={session.conversationOpen}
               onPressIn={() => void session.startTalking()}
               onPressOut={() => void session.stopTalking()}
             />
@@ -161,6 +202,16 @@ const styles = StyleSheet.create({
   },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 19 },
   errorHint: { color: colors.textMuted, fontSize: 11, marginTop: spacing.xs },
+  hint: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accentSoft,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.accent,
+  },
+  hintText: { color: colors.accent, fontSize: 13, lineHeight: 19 },
   retry: {
     marginHorizontal: spacing.lg,
     marginTop: spacing.lg,

@@ -32,6 +32,8 @@ from app.services.conversation import ConversationManager
 from app.services.device_state import DeviceStateManager
 from app.services.orchestrator import Orchestrator
 from app.services.speaker import SpeakerManager
+from app.services.voice_gate import VoiceGate
+from app.services.wakeword import WakeWordDetector
 from app.storage.backend import KeyValueStore, create_store
 
 log = logging.getLogger(__name__)
@@ -56,6 +58,8 @@ class AppContainer:
     started_at: float
     audio_hub: AudioBroadcastHub
     speaker_manager: SpeakerManager
+    wake_detector: WakeWordDetector
+    voice_gate: VoiceGate
 
     # ------------------------------------------------------------- lifecycle
     @classmethod
@@ -119,12 +123,34 @@ class AppContainer:
             history_turns=settings.conversation_max_turns,
             tts_chunk_bytes=settings.tts_chunk_bytes,
             sample_rate=settings.audio_sample_rate,
+            assistant_name=settings.assistant_name,
         )
 
         speaker_manager = SpeakerManager(
             profiles_path=settings.resolve(settings.voice_profiles_path),
             enabled=settings.voice_verification_enabled,
             threshold=settings.voice_verification_threshold,
+            required_samples=settings.voice_enrollment_samples,
+        )
+        wake_detector = WakeWordDetector(
+            name=settings.assistant_name,
+            aliases=settings.wake_word_aliases,
+            threshold=settings.wake_word_threshold,
+            enabled=settings.wake_word_enabled,
+        )
+        voice_gate = VoiceGate(
+            detector=wake_detector, speakers=speaker_manager, settings=settings
+        )
+        log.info(
+            "voice gate ready",
+            extra={
+                "assistant": wake_detector.name,
+                "wake_word": wake_detector.enabled,
+                "aliases": list(wake_detector.aliases),
+                "follow_up_s": voice_gate.follow_up_s,
+                "verification": speaker_manager.enabled,
+                "enrolled": len(speaker_manager.list_speakers()),
+            },
         )
 
         return cls(
@@ -145,6 +171,8 @@ class AppContainer:
             started_at=time.monotonic(),
             audio_hub=AudioBroadcastHub(),
             speaker_manager=speaker_manager,
+            wake_detector=wake_detector,
+            voice_gate=voice_gate,
         )
 
     async def aclose(self) -> None:

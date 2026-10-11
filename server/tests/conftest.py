@@ -41,9 +41,14 @@ def frozen_clock(monkeypatch: pytest.MonkeyPatch) -> datetime:
 
 
 @pytest.fixture
-def settings() -> Settings:
+def settings(tmp_path) -> Settings:
+    # Voice profiles go to a scratch file per test. Pointed at the real
+    # ``config/speakers.json`` the enrollment tests enroll a speaker into the
+    # developer's apartment and leave it there, which then changes what the
+    # *next* run of the voice tests does.
     return Settings(
         _env_file=None,
+        voice_profiles_path=tmp_path / "speakers.json",
         app_env="dev",
         debug=True,
         log_json=False,

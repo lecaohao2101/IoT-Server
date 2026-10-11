@@ -205,9 +205,40 @@ class SpeakerProfile:
     embedding: list[float] = field(default_factory=list)
     samples_count: int = 1
     created_at: str = ""
+    #: When the last sample was folded in. A profile that keeps failing is
+    #: usually one enrolled once, months ago, in a different room.
+    updated_at: str = ""
+    #: Which enrollment prompts this voice has already read. Lets the app
+    #: resume an interrupted enrollment on the sentence it stopped at.
+    phrases_done: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+#: What the app puts on screen for the user to read aloud.
+#:
+#: Every one of them opens with the assistant's name on purpose: enrollment is
+#: the one moment the user is guaranteed to be reading instructions, so it is
+#: also where they learn what to call the apartment. Reading sentences rather
+#: than humming also gives the fingerprint real speech -- voiced vowels across a
+#: range of pitches -- which a held "aaaa" does not.
+ENROLLMENT_PHRASES: tuple[str, ...] = (
+    "{name} ơi, bật đèn phòng khách giúp mình với.",
+    "{name} ơi, nhiệt độ trong phòng ngủ bây giờ là bao nhiêu?",
+    "{name} ơi, tắt hết đèn rồi đóng rèm lại giúp mình nhé.",
+    "{name} ơi, mình thấy hơi nóng, bật điều hoà lên giúp mình.",
+    "{name} ơi, chúc mình một buổi tối thật dễ chịu nhé.",
+)
+
+
+def enrollment_phrases(assistant_name: str, count: int) -> list[str]:
+    """``count`` sentences to read, named after this apartment's assistant."""
+    total = max(1, count)
+    return [
+        ENROLLMENT_PHRASES[i % len(ENROLLMENT_PHRASES)].format(name=assistant_name)
+        for i in range(total)
+    ]
 
 
 @dataclass
@@ -230,10 +261,12 @@ class SpeakerManager:
         profiles_path: Path | None = None,
         enabled: bool = False,
         threshold: float = 0.75,
+        required_samples: int = 3,
     ) -> None:
         self.profiles_path = profiles_path
         self.enabled = enabled
         self.threshold = threshold
+        self.required_samples = max(1, required_samples)
         self._profiles: dict[str, SpeakerProfile] = {}
         if self.profiles_path:
             self.load()
@@ -248,6 +281,19 @@ class SpeakerManager:
     def get_speaker(self, speaker_id: str) -> SpeakerProfile | None:
         return self._profiles.get(speaker_id)
 
+    def is_complete(self, profile: SpeakerProfile | None) -> bool:
+        """Whether a profile has read enough sentences to stop being asked.
+
+        One sample already verifies; the remaining two are what stop a verdict
+        from hanging on the one moment the microphone was clipped.
+        """
+        return profile is not None and profile.samples_count >= self.required_samples
+
+    def remaining_samples(self, speaker_id: str) -> int:
+        profile = self._profiles.get(speaker_id)
+        done = profile.samples_count if profile else 0
+        return max(0, self.required_samples - done)
+
     def enroll(
         self,
         *,
@@ -255,11 +301,13 @@ class SpeakerManager:
         name: str,
         pcm_bytes: bytes,
         role: str = "member",
+        phrase_index: int | None = None,
     ) -> SpeakerProfile:
         """Enroll a new speaker or update an existing one with a voice sample."""
         embedding = AcousticFingerprint.extract(pcm_bytes)
         if embedding is None:
             raise ValueError("Không đủ dữ liệu âm thanh giọng nói để tạo mẫu nhận diện.")
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         existing = self._profiles.get(speaker_id)
         if existing and existing.embedding and len(existing.embedding) == len(embedding):
@@ -275,6 +323,7 @@ class SpeakerManager:
             existing.samples_count = n + 1
             existing.name = name
             existing.role = role
+            existing.updated_at = stamp
             profile = existing
         else:
             profile = SpeakerProfile(
@@ -283,9 +332,13 @@ class SpeakerManager:
                 role=role,
                 embedding=embedding,
                 samples_count=1,
-                created_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                created_at=stamp,
+                updated_at=stamp,
             )
             self._profiles[speaker_id] = profile
+
+        if phrase_index is not None and phrase_index not in profile.phrases_done:
+            profile.phrases_done.append(phrase_index)
 
         self.save()
         log.info(
@@ -294,6 +347,8 @@ class SpeakerManager:
                 "speaker_id": speaker_id,
                 "name": name,
                 "samples": profile.samples_count,
+                "required": self.required_samples,
+                "complete": self.is_complete(profile),
             },
         )
         return profile

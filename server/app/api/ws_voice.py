@@ -95,7 +95,7 @@ async def voice_endpoint(
         session_id=session_id,
         room=room,
         audio_hub=container.audio_hub,
-        speaker_manager=container.speaker_manager,
+        voice_gate=container.voice_gate,
     )
     try:
         await session.run()

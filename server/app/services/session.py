@@ -30,6 +30,7 @@ from app.core.security import Principal
 from app.core.utils import new_id, truncate
 from app.logging_setup import trace_id_var
 from app.services.orchestrator import Orchestrator, TurnSink
+from app.services.voice_gate import GateOutcome, VoiceGate
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ class VoiceSession(TurnSink):
         session_id: str | None = None,
         room: str | None = None,
         audio_hub: Any = None,
-        speaker_manager: Any = None,
+        voice_gate: VoiceGate | None = None,
     ) -> None:
         self._ws = websocket
         self._orchestrator = orchestrator
@@ -58,7 +59,10 @@ class VoiceSession(TurnSink):
         self._bus = bus
         self._principal = principal
         self._audio_hub = audio_hub
-        self._speaker_manager = speaker_manager
+        #: Without a gate every recognised sentence becomes a command. Optional
+        #: so a test can drive the socket machinery on its own, never optional
+        #: on a socket built by ``ws_voice``.
+        self._gate = voice_gate
         self._utterance_frames: list[bytes] = []
 
         self.session_id = session_id or new_id("sess")
@@ -213,7 +217,13 @@ class VoiceSession(TurnSink):
         elif kind == "audio.end":
             await self._end_recognition()
         elif kind == "text":
+            # Typed text carries its own intent: somebody opened the app, wrote a
+            # sentence and pressed send. Demanding the wake word of a keyboard
+            # would be ceremony, and there is no audio to verify a voice against.
+            # It does open the conversation, so the next spoken turn needs no name.
             await self._cancel_active("user_text")
+            if self._gate is not None:
+                self._gate.open_window(self.session_id)
             await self._start_turn(message.text)  # type: ignore[attr-defined]
         elif kind == "cancel":
             await self._cancel_active("user_cancel")
@@ -245,6 +255,13 @@ class VoiceSession(TurnSink):
                 reply_encoding=self._reply_encoding.value if self._client_wants_audio else "none",
                 silence_timeout_ms=self._s.silence_timeout_ms,
                 max_utterance_s=self._s.max_utterance_s,
+                # The client cannot guess the name it has to say, and hardcoding
+                # it in two codebases is how the phone ends up prompting for a
+                # name the server stopped listening for.
+                assistant_name=self._s.assistant_name,
+                wake_word_required=self._gate is not None and self._s.wake_word_enabled,
+                wake_follow_up_s=self._s.wake_follow_up_s,
+                voice_enrollment_required=self._s.voice_enrollment_required,
             )
         )
 
@@ -259,10 +276,20 @@ class VoiceSession(TurnSink):
             await self._cancel_active("barge_in")
 
         frame = self._normalise(payload)
-        frame = denoise_pcm16(frame)
-        self._utterance_frames.append(frame)
+        # Open the utterance before anything is recorded against it: the reset
+        # empties both buffers, so a frame kept first is a frame thrown away --
+        # which cost the voice fingerprint the opening of every sentence, the
+        # part where the speaker's voice is clearest.
         if self._stream is None:
             await self._reset_utterance()
+
+        # Two chains from one microphone, on purpose. Recognition gets the
+        # denoised signal; the voice fingerprint gets the raw one, because the
+        # app enrolls raw audio over REST and a profile built through one chain
+        # does not match an utterance measured through the other -- which reads
+        # as "it rejects me even though I registered".
+        self._utterance_frames.append(frame)
+        frame = denoise_pcm16(frame)
 
         self._utterance_bytes += len(frame)
         if self._utterance_bytes > self._s.max_audio_bytes_per_utterance:
@@ -403,59 +430,89 @@ class VoiceSession(TurnSink):
 
         if final_text and not self._closed:
             await self._send(proto.stt_final(final_text, confidence))
+            await self._gated_turn(final_text)
 
-            if (
-                self._speaker_manager is not None
-                and self._speaker_manager.enabled
-                and self._speaker_manager.has_enrolled_speakers
-            ):
-                audio_payload = b"".join(self._utterance_frames)
-                verify_res = self._speaker_manager.verify(audio_payload)
-                if not verify_res.verified:
-                    log.warning(
-                        "voice command rejected -- unauthorized speaker",
-                        extra={
-                            "session_id": self.session_id,
-                            "reason": verify_res.reason,
-                            "score": verify_res.score,
-                            "threshold": verify_res.threshold,
-                            "text": truncate(final_text, 80),
-                        },
-                    )
-                    rejection_speech = (
-                        "Xin lỗi, mình không nhận diện được giọng nói của bạn "
-                        "trong danh sách người dùng được cấp quyền."
-                    )
-                    await self._reject_unauthorized_speaker(rejection_speech)
-                    return
+    # ----------------------------------------------------------------- gate
+    async def _gated_turn(self, final_text: str) -> None:
+        """Run the utterance only if it was addressed to us, by someone we know.
 
+        The transcript goes out above either way: a user who said the wrong name
+        needs to see what the server heard, otherwise "it ignores me" has no
+        evidence attached to it.
+        """
+        if self._gate is None:
             await self._start_turn(final_text)
+            return
 
-    async def _reject_unauthorized_speaker(self, speech: str) -> None:
+        decision = self._gate.evaluate(
+            session_id=self.session_id,
+            text=final_text,
+            audio=b"".join(self._utterance_frames),
+            has_pending=await self._orchestrator.has_pending(self.session_id),
+        )
+        log.info(
+            "voice gate decision",
+            extra={
+                "session_id": self.session_id,
+                **decision.as_log_fields(),
+                **self._text_field(final_text),
+            },
+        )
+
+        if decision.outcome is GateOutcome.IGNORE:
+            # Silence on purpose: the sentence was not for us, and an apartment
+            # that answers everything it overhears is worse than one that waits.
+            await self._send(
+                proto.wake_required(self._gate.assistant_name, truncate(final_text, 120))
+            )
+            return
+
+        if decision.outcome is GateOutcome.ALLOW:
+            if decision.wake is not None and decision.wake.matched:
+                await self._send(
+                    proto.wake_active(
+                        self._gate.assistant_name, self.session_id, self._gate.follow_up_s
+                    )
+                )
+            await self._start_turn(decision.text)
+            return
+
+        if decision.outcome is GateOutcome.SUMMON:
+            await self._send(
+                proto.wake_active(
+                    self._gate.assistant_name, self.session_id, self._gate.follow_up_s
+                )
+            )
+            await self._say(decision.speech)
+            return
+
+        await self._say(decision.speech, error=decision.code)
+
+    async def _say(self, speech: str, error: str | None = None) -> None:
+        """Answer with a fixed sentence: no model, no commands, no plan.
+
+        Used for everything the gate decides on its own -- the acknowledgement of
+        a summon and the two refusals. The reply still has to be *spoken*, not
+        just displayed: the person being turned away is usually the one standing
+        in the room with no screen in their hand.
+        """
+        if not speech:
+            return
         await self._send(proto.assistant_delta(speech))
         await self._send(
-            proto.assistant_final(
-                speech,
-                plan=None,
-                error="unauthorized_speaker",
-                latency_ms={"total": 0.0},
-            )
+            proto.assistant_final(speech, plan=None, error=error, latency_ms={"total": 0.0})
         )
-        if self._speak:
-            try:
-                audio_res = await self._orchestrator._tts.synthesize(
-                    speech,
-                    encoding=self._turn_encoding,
-                    sample_rate=self._s.audio_sample_rate,
-                )
-                if audio_res and audio_res.audio:
-                    await self.audio_start(audio_res.encoding, audio_res.sample_rate)
-                    chunk_sz = self._s.tts_chunk_bytes
-                    for i in range(0, len(audio_res.audio), chunk_sz):
-                        await self.audio_chunk(audio_res.audio[i : i + chunk_sz])
-                    await self.audio_end()
-            except Exception as exc:  # noqa: BLE001
-                log.warning("failed to synthesize speaker rejection speech: %s", exc)
+        if not self._speak:
+            return
+        try:
+            await self._orchestrator.speak(
+                speech,
+                sink=self,
+                encoding=self._turn_encoding,
+                sample_rate=self._s.audio_sample_rate,
+            )
+        except Exception as exc:  # noqa: BLE001 - a silent refusal is still a refusal
+            log.warning("failed to synthesise gate reply: %s", exc)
 
     # ---------------------------------------------------------------- turn
     async def _start_turn(self, text: str) -> None:

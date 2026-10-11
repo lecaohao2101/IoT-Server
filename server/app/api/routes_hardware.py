@@ -20,10 +20,16 @@ from app.api.deps import Container
 from app.core.audio import rms
 from app.core.errors import ProviderError
 from app.core.utils import truncate
+from app.services.voice_gate import GateOutcome
 
 log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["hardware"])
+
+#: The board holds no session of its own, so every utterance from the microphone
+#: shares one conversation -- which is what lets a follow-up sentence land
+#: inside the window opened by the last summon.
+HARDWARE_SESSION_ID = "esp32_hardware"
 
 
 class HardwareStatusPayload(BaseModel):
@@ -266,10 +272,63 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
 
     sink = HubTurnSink(container.audio_hub)
 
+    # The board listens continuously and posts whatever it hears, so this is the
+    # same gate the WebSocket uses: the name has to be there, and the voice has
+    # to be one we know. This route takes no credential -- the gate is the only
+    # thing between a passer-by on the balcony and the lights.
+    decision = container.voice_gate.evaluate(
+        session_id=HARDWARE_SESSION_ID,
+        text=user_text,
+        audio=body,
+        has_pending=await container.orchestrator.has_pending(HARDWARE_SESSION_ID),
+    )
+    log.info(
+        "voice gate decision",
+        extra={
+            "session_id": HARDWARE_SESSION_ID,
+            "source": "upload-audio",
+            **decision.as_log_fields(),
+            **({"text": truncate(user_text, 200)} if container.settings.log_transcripts else {}),
+        },
+    )
+
+    if decision.outcome is GateOutcome.IGNORE:
+        # Nothing is spoken: the board is in a room where people talk to each
+        # other, and an apartment that answers every overheard sentence is
+        # unusable. The firmware prints the reason on its serial console.
+        states = await _build_pin_states(container)
+        rooms = await _build_room_states(container)
+        return {
+            "success": False,
+            "transcript": user_text,
+            "response": "",
+            "error": "wake_word_required",
+            "assistant_name": container.voice_gate.assistant_name,
+            "states": states,
+            "rooms": rooms,
+        }
+
+    if decision.outcome is not GateOutcome.ALLOW:
+        # A summon or a refusal: a fixed sentence, spoken on the speaker that is
+        # pulling from the hub, with the model never consulted.
+        await container.orchestrator.speak(
+            decision.speech, sink=sink, encoding=AudioEncoding.PCM16
+        )
+        states = await _build_pin_states(container)
+        rooms = await _build_room_states(container)
+        return {
+            "success": decision.outcome is GateOutcome.SUMMON,
+            "transcript": user_text,
+            "response": decision.speech,
+            "error": None if decision.outcome is GateOutcome.SUMMON else decision.code,
+            "states": states,
+            "rooms": rooms,
+        }
+
     # Execute intent through the conversation orchestrator
     turn = await container.orchestrator.run_turn(
-        session_id="esp32_hardware",
-        user_text=user_text,
+        session_id=HARDWARE_SESSION_ID,
+        user_text=decision.text,
         sink=sink,
         speak=True,
         encoding=AudioEncoding.PCM16,

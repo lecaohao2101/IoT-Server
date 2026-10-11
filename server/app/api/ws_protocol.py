@@ -139,6 +139,27 @@ def state_changed(device_id: str, state: dict[str, Any], online: bool):
     return _frame("state.changed", device_id=device_id, state=state, online=online)
 
 
+def wake_required(assistant_name: str, heard: str = ""):
+    """The utterance was not addressed to us, and nothing was done with it.
+
+    Deliberately not a ``notice``: on the phone a notice is an error banner, and
+    the user holding the talk button without saying the name has made no error.
+    A client that does not know this frame ignores it and simply shows no reply,
+    which is also correct.
+    """
+    return _frame("wake.required", assistant_name=assistant_name, heard=heard)
+
+
+def wake_active(assistant_name: str, session_id: str, follow_up_s: float):
+    """The assistant was summoned: the conversation is open for follow-ups."""
+    return _frame(
+        "wake.active",
+        assistant_name=assistant_name,
+        session_id=session_id,
+        follow_up_s=round(follow_up_s, 1),
+    )
+
+
 def notice(code: str, message: str):
     return _frame("notice", code=code, message=message)
 

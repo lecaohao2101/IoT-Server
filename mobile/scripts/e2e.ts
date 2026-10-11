@@ -86,6 +86,20 @@ async function main(): Promise<number> {
 
   await done;
 
+  // Màn hình đăng ký giọng nói đi qua REST, không qua WebSocket, nên phải gọi
+  // riêng. Lỗi ở đây được giữ lại để báo cáo cùng các kiểm tra khác.
+  const enrollment: { plan: Frame | null; error: string } = { plan: null, error: '' };
+  try {
+    const base = url.replace(/^ws/i, 'http');
+    const res = await fetch(`${base}/api/v1/speakers/enrollment`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (res.ok) enrollment.plan = (await res.json()) as Frame;
+    else enrollment.error = `HTTP ${res.status}`;
+  } catch (err) {
+    enrollment.error = (err as Error).message;
+  }
+
   const kinds = frames.map((f) => f.type);
   console.log(`  khung nhận được: ${kinds.join(' -> ')}`);
   console.log(`  khung audio: ${audio.length}, tổng ${audio.reduce((n, a) => n + a.length, 0)} byte`);
@@ -103,6 +117,36 @@ async function main(): Promise<number> {
 
   check('server chào bằng session.ready', () => {
     assert.ok(kinds.includes('session.ready'));
+  });
+
+  check('session.ready cho biết phải gọi tên nào để đánh thức trợ lý', () => {
+    const ready = frames.find((f) => f.type === 'session.ready')!;
+    // App hiển thị đúng cái tên này trên nút nói và trong gợi ý khi người dùng
+    // quên gọi. Nếu server bỏ trường này, app sẽ im lặng không nhắc gì cả.
+    assert.equal(typeof ready.assistant_name, 'string');
+    assert.ok(ready.assistant_name.length > 0, 'assistant_name rỗng');
+    assert.equal(typeof ready.wake_word_required, 'boolean');
+    if (ready.wake_word_required) {
+      assert.equal(typeof ready.wake_follow_up_s, 'number');
+    }
+  });
+
+  check('server cấp kịch bản đăng ký giọng nói cho người dùng mới', () => {
+    // Màn hình đăng ký của app sống bằng dữ liệu này. Các câu mẫu nằm ở server
+    // chứ không nằm trong app, nên đây là chỗ duy nhất phát hiện ra nếu nó mất.
+    assert.ok(enrollment.plan, `không gọi được /api/v1/speakers/enrollment: ${enrollment.error}`);
+    const plan = enrollment.plan!;
+    assert.ok(plan.required_samples >= 1);
+    assert.equal(plan.phrases.length, plan.required_samples);
+    assert.ok(plan.phrases.every((p: Frame) => typeof p.text === 'string' && p.text.length > 0));
+    assert.equal(plan.sample_rate, 16000);
+    assert.equal(plan.encoding, 'pcm16');
+    const ready = frames.find((f) => f.type === 'session.ready')!;
+    assert.equal(
+      plan.assistant_name,
+      ready.assistant_name,
+      'tên trợ lý trong câu mẫu khác với tên server đang nghe'
+    );
   });
 
   check('có assistant.delta trước khi có assistant.final', () => {

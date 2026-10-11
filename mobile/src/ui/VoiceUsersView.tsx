@@ -14,9 +14,11 @@ import {
 import {
   deleteSpeakerProfile,
   enrollSpeaker,
+  fetchEnrollmentPlan,
   fetchSpeakers,
   updateSpeakerSettings,
   verifySpeakerAudio,
+  type EnrollmentPlan,
   type SpeakerRole,
   type SpeakerSummary,
   type VerifySpeakerResponse,
@@ -49,6 +51,9 @@ export function VoiceUsersView({
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Câu mẫu và tên trợ lý lấy từ server: người thêm sau phải đọc đúng những câu
+  // mà người đăng ký đầu tiên đã đọc, nếu không hai hồ sơ không so sánh được.
+  const [plan, setPlan] = useState<EnrollmentPlan | null>(null);
 
   // Enroll modal state
   const [enrollModalVisible, setEnrollModalVisible] = useState(false);
@@ -69,6 +74,7 @@ export function VoiceUsersView({
       setSpeakers(res.speakers);
       setEnabled(res.enabled);
       setThreshold(res.threshold);
+      setPlan(await fetchEnrollmentPlan(settings));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -132,7 +138,7 @@ export function VoiceUsersView({
     setEnrollSaving(true);
     setError(null);
     try {
-      await enrollSpeaker(settings, speakerId, name, newRole, pcm);
+      await enrollSpeaker(settings, speakerId, name, newRole, pcm, 0);
       setEnrollModalVisible(false);
       setNewName('');
       setFeedback(`Đã đăng ký thành công giọng nói của "${name}"!`);
@@ -213,6 +219,15 @@ export function VoiceUsersView({
             <View style={styles.badge}>
               <Text style={styles.badgeLabel}>Chặn người lạ: BẬT</Text>
             </View>
+            {plan && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeLabel}>
+                  {plan.wake_word_enabled
+                    ? `Gọi tên để đánh thức: “${plan.assistant_name}”`
+                    : `Trợ lý: ${plan.assistant_name}`}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -257,6 +272,11 @@ export function VoiceUsersView({
                 <Text style={styles.speakerSub}>
                   {s.samples_count} mẫu giọng · Đăng ký lúc: {new Date(s.created_at).toLocaleDateString('vi-VN')}
                 </Text>
+                {s.complete === false && (
+                  <Text style={styles.incomplete}>
+                    Chưa đủ mẫu — còn thiếu {s.remaining_samples ?? 0} câu, nhận diện sẽ kém chính xác
+                  </Text>
+                )}
               </View>
               <Pressable
                 onPress={() => handleDelete(s)}
@@ -345,10 +365,16 @@ export function VoiceUsersView({
             </View>
 
             <View style={styles.recordSection}>
+              {plan?.phrases[0] && (
+                <View style={styles.phraseBox}>
+                  <Text style={styles.phraseLabel}>Đọc to câu này</Text>
+                  <Text style={styles.phraseText}>“{plan.phrases[0].text}”</Text>
+                </View>
+              )}
               <Text style={styles.recordHint}>
                 {capturingClip
-                  ? 'Đang lắng nghe... Hãy nói rõ ràng câu khẩu lệnh bất kỳ'
-                  : 'Giữ nút bên dưới và nói một câu ngắn (khoảng 2-3 giây)'}
+                  ? 'Đang lắng nghe... Hãy đọc trọn câu ở trên'
+                  : 'Giữ nút bên dưới và đọc câu trên (khoảng 2-3 giây)'}
               </Text>
 
               {/* Đồng hồ âm lượng */}
@@ -575,6 +601,18 @@ const styles = StyleSheet.create({
   },
   roleTagText: { color: colors.textMuted, fontSize: 11 },
   speakerSub: { color: colors.textMuted, fontSize: 12 },
+  incomplete: { color: colors.warn, fontSize: 11, marginTop: 2 },
+  phraseBox: {
+    width: '100%',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: radius.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  phraseLabel: { color: colors.accent, fontSize: 11, fontWeight: '700' },
+  phraseText: { color: colors.text, fontSize: 15, lineHeight: 23, textAlign: 'center' },
   deleteBtn: { padding: spacing.sm },
   deleteText: { fontSize: 16 },
   actionRow: { gap: spacing.sm, marginTop: spacing.xs },

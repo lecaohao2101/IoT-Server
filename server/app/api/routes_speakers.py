@@ -6,10 +6,11 @@ import base64
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.deps import Container, CurrentPrincipal
+from app.services.speaker import SpeakerManager, SpeakerProfile, enrollment_phrases
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ class SpeakerSummary(BaseModel):
     role: str
     samples_count: int
     created_at: str
+    #: False while the profile still owes samples. The app keeps the enrollment
+    #: screen up until this turns true.
+    complete: bool = True
+    remaining_samples: int = 0
 
 
 class SpeakersListResponse(BaseModel):
@@ -31,11 +36,43 @@ class SpeakersListResponse(BaseModel):
     speakers: list[SpeakerSummary]
 
 
+class EnrollmentPhrase(BaseModel):
+    index: int
+    text: str
+
+
+class EnrollmentPlanResponse(BaseModel):
+    """Everything the app needs to put an enrollment screen on the phone."""
+
+    #: Whether this device must enroll before it is allowed to talk. False does
+    #: not mean enrollment is pointless, only that it is not blocking.
+    required: bool
+    #: Whether ``speaker_id`` (when given) has finished reading its sentences.
+    satisfied: bool
+    assistant_name: str
+    wake_word_enabled: bool
+    verification_enabled: bool
+    required_samples: int
+    completed_samples: int
+    #: Read these aloud, in order; one recording each.
+    phrases: list[EnrollmentPhrase]
+    #: The format the recordings must arrive in. Getting this wrong produces a
+    #: profile that never matches anybody, silently.
+    sample_rate: int
+    channels: int
+    encoding: str
+    min_sample_ms: int
+    enrolled_total: int
+
+
 class EnrollSpeakerRequest(BaseModel):
     speaker_id: str = Field(..., min_length=1, max_length=64)
     name: str = Field(..., min_length=1, max_length=100)
     role: Literal["owner", "member", "guest"] = "member"
     audio_base64: str = Field(..., description="Base64 encoded 16 kHz mono 16-bit PCM audio")
+    #: Which prompt was read, so an interrupted enrollment can resume where it
+    #: stopped instead of starting the user over.
+    phrase_index: int | None = Field(default=None, ge=0, le=64)
 
 
 class VerifySpeakerRequest(BaseModel):
@@ -58,20 +95,65 @@ class SpeakerSettingsUpdate(BaseModel):
     threshold: float | None = Field(default=None, ge=0.0, le=1.0)
 
 
+def _summary(manager: SpeakerManager, profile: SpeakerProfile) -> SpeakerSummary:
+    return SpeakerSummary(
+        id=profile.id,
+        name=profile.name,
+        role=profile.role,
+        samples_count=profile.samples_count,
+        created_at=profile.created_at,
+        complete=manager.is_complete(profile),
+        remaining_samples=manager.remaining_samples(profile.id),
+    )
+
+
+@router.get("/enrollment", response_model=EnrollmentPlanResponse)
+async def enrollment_plan(
+    container: Container,
+    principal: CurrentPrincipal,
+    speaker_id: str | None = Query(default=None, max_length=64),
+) -> EnrollmentPlanResponse:
+    """What this device has to record before it can give voice commands.
+
+    The phrases come from the server rather than the app so that changing the
+    assistant's name changes what people are asked to read, in one place. They
+    all contain the name on purpose: the first thing a new user does is say it.
+    """
+    manager = container.speaker_manager
+    settings = container.settings
+    profile = manager.get_speaker(speaker_id) if speaker_id else None
+    done = profile.samples_count if profile else 0
+
+    return EnrollmentPlanResponse(
+        required=settings.voice_enrollment_required or manager.enabled,
+        satisfied=manager.is_complete(profile),
+        assistant_name=settings.assistant_name,
+        wake_word_enabled=settings.wake_word_enabled,
+        verification_enabled=manager.enabled,
+        required_samples=manager.required_samples,
+        completed_samples=done,
+        phrases=[
+            EnrollmentPhrase(index=i, text=text)
+            for i, text in enumerate(
+                enrollment_phrases(settings.assistant_name, manager.required_samples)
+            )
+        ],
+        sample_rate=settings.audio_sample_rate,
+        channels=1,
+        encoding="pcm16",
+        #: Shorter than this and the fingerprint has too few voiced frames to
+        #: mean anything -- the extractor would refuse it anyway, after the
+        #: upload.
+        min_sample_ms=800,
+        enrolled_total=len(manager.list_speakers()),
+    )
+
+
 @router.get("", response_model=SpeakersListResponse)
 async def list_speakers(container: Container, principal: CurrentPrincipal) -> SpeakersListResponse:
     """List all enrolled speaker profiles and verification configuration."""
     manager = container.speaker_manager
-    speakers = [
-        SpeakerSummary(
-            id=s.id,
-            name=s.name,
-            role=s.role,
-            samples_count=s.samples_count,
-            created_at=s.created_at,
-        )
-        for s in manager.list_speakers()
-    ]
+    speakers = [_summary(manager, s) for s in manager.list_speakers()]
     return SpeakersListResponse(
         enabled=manager.enabled,
         threshold=manager.threshold,
@@ -102,6 +184,7 @@ async def enroll_speaker(
             name=request.name,
             pcm_bytes=pcm_bytes,
             role=request.role,
+            phrase_index=request.phrase_index,
         )
     except ValueError as exc:
         raise HTTPException(
@@ -109,13 +192,7 @@ async def enroll_speaker(
             detail=str(exc),
         ) from exc
 
-    return SpeakerSummary(
-        id=profile.id,
-        name=profile.name,
-        role=profile.role,
-        samples_count=profile.samples_count,
-        created_at=profile.created_at,
-    )
+    return _summary(manager, profile)
 
 
 @router.post("/verify", response_model=VerifySpeakerResponse)

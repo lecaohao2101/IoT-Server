@@ -89,6 +89,23 @@ async def system_info(container: Container, _: CurrentPrincipal) -> dict[str, An
             # phát được lời đáp, dù phần nhận dạng và điều khiển vẫn chạy đúng.
             "speaker_listeners": container.audio_hub.active_subscribers_count,
         },
+        # Cái tên người dùng phải gọi và cái tên trợ lý tự nhận là một. Khi nghi
+        # ngờ "gọi mãi mà nó không trả lời", đây là chỗ xem server đang nghe tên
+        # nào, chứ không phải file .env.
+        "assistant": {
+            "name": settings.assistant_name,
+            "wake_word_enabled": settings.wake_word_enabled,
+            "wake_word_aliases": list(container.wake_detector.aliases),
+            "wake_word_threshold": settings.wake_word_threshold,
+            "follow_up_s": settings.wake_follow_up_s,
+        },
+        "voice_biometrics": {
+            "verification_enabled": container.speaker_manager.enabled,
+            "enrollment_required": settings.voice_enrollment_required,
+            "required_samples": container.speaker_manager.required_samples,
+            "enrolled_speakers": len(container.speaker_manager.list_speakers()),
+            "threshold": container.speaker_manager.threshold,
+        },
         "safety": {
             "max_commands_per_plan": container.policy.max_commands_per_plan,
             "quiet_hours_enabled": container.policy.quiet_hours.enabled,

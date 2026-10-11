@@ -38,6 +38,7 @@ from app.ai.base import (
 )
 from app.ai.prompts import build_policy_notes, build_system_prompt
 from app.ai.schemas import SPEECH_FIELD, AssistantReply, response_json_schema
+from app.config import DEFAULT_ASSISTANT_NAME
 from app.core.errors import AppError, ProviderError, TransportError
 from app.core.eventbus import TOPIC_COMMAND_REJECTED, TOPIC_CONVERSATION_TURN, EventBus
 from app.core.json_stream import SentenceChunker, StreamingStringField, extract_json_object
@@ -206,6 +207,7 @@ class Orchestrator:
         history_turns: int = 8,
         tts_chunk_bytes: int = 3200,
         sample_rate: int = 16000,
+        assistant_name: str = DEFAULT_ASSISTANT_NAME,
     ) -> None:
         self._home = home
         self._policy = policy
@@ -219,7 +221,22 @@ class Orchestrator:
         self._history_turns = history_turns
         self._tts_chunk_bytes = tts_chunk_bytes
         self._sample_rate = sample_rate
+        self._assistant_name = assistant_name
         self._policy_notes = build_policy_notes(home, policy)
+
+    @property
+    def assistant_name(self) -> str:
+        return self._assistant_name
+
+    async def has_pending(self, session_id: str) -> bool:
+        """Whether a sensitive action is parked waiting for a yes or a no.
+
+        The voice gate asks before it refuses an utterance for missing the wake
+        word: an answer to a question the assistant just asked must not need the
+        name again.
+        """
+        ctx = await self._conversations.get(session_id)
+        return ctx.pending is not None
 
     # ------------------------------------------------------------------ API
     async def run_turn(
@@ -266,6 +283,7 @@ class Orchestrator:
             current_room=ctx.room or room,
             quiet_hours=quiet,
             policy_notes=self._policy_notes,
+            assistant_name=self._assistant_name,
         )
         messages = self._history(session_id, ctx, user_text)
 
@@ -571,6 +589,36 @@ class Orchestrator:
             session_id=session_id, user_text=user_text, speech=speech, plan=plan, report=report
         )
 
+    async def speak(
+        self,
+        text: str,
+        *,
+        sink: TurnSink,
+        encoding: AudioEncoding = AudioEncoding.PCM16,
+        sample_rate: int | None = None,
+    ) -> None:
+        """Synthesise one sentence into a sink without involving the model.
+
+        The voice gate's refusals go out this way. They must sound like the
+        assistant, and they must never be a prompt the model could talk its way
+        around -- so the text is fixed and the model is not called at all.
+        """
+        if not text.strip():
+            return
+        worker = _SpeechWorker(
+            self._tts,
+            sink,
+            encoding,
+            sample_rate or self._sample_rate,
+            self._tts_chunk_bytes,
+        )
+        try:
+            worker.submit(text)
+            await worker.finish()
+        finally:
+            if not worker.done:
+                await worker.abort()
+
     async def _speak_simple(
         self,
         text: str,
@@ -580,15 +628,8 @@ class Orchestrator:
         sample_rate: int,
     ) -> None:
         await sink.assistant_delta(text)
-        if not speak:
-            return
-        worker = _SpeechWorker(self._tts, sink, encoding, sample_rate, self._tts_chunk_bytes)
-        try:
-            worker.submit(text)
-            await worker.finish()
-        finally:
-            if not worker.done:
-                await worker.abort()
+        if speak:
+            await self.speak(text, sink=sink, encoding=encoding, sample_rate=sample_rate)
 
     # -------------------------------------------------------------- helpers
     def _device_name(self, device_id: str) -> str:

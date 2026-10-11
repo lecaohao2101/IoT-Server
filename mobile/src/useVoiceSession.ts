@@ -70,6 +70,14 @@ export function useVoiceSession(settings: Settings | null) {
   const [speaking, setSpeaking] = useState(false);
   const [level, setLevel] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // Tên trợ lý và quy tắc gọi tên đến từ `session.ready`. App không giữ bản sao
+  // của cái tên đó: server đổi tên mà app vẫn nhắc tên cũ là tệ hơn không nhắc.
+  const [assistantName, setAssistantName] = useState<string | null>(null);
+  const [wakeWordRequired, setWakeWordRequired] = useState(false);
+  // Đang trong cửa sổ trò chuyện: câu tiếp theo không cần gọi lại tên.
+  const [conversationOpen, setConversationOpen] = useState(false);
+  // Nhắc nhở nhẹ, không phải lỗi: quên gọi tên thì người dùng không làm gì sai.
+  const [hint, setHint] = useState<string | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const wantConnectedRef = useRef(false);
@@ -89,6 +97,7 @@ export function useVoiceSession(settings: Settings | null) {
   const pcmChunksRef = useRef<Uint8Array[]>([]);
   const settingsRef = useRef<Settings | null>(settings);
   settingsRef.current = settings;
+  const wakeWindowRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const speech = useMemo(() => new SpeechQueue(setSpeaking), []);
 
@@ -157,6 +166,8 @@ export function useVoiceSession(settings: Settings | null) {
         case 'session.ready':
           setState('ready');
           setError(null);
+          if (frame.assistant_name) setAssistantName(frame.assistant_name);
+          setWakeWordRequired(frame.wake_word_required === true);
           attemptRef.current = 0; // kết nối tốt: bắt đầu lại backoff từ đầu
           break;
 
@@ -166,11 +177,38 @@ export function useVoiceSession(settings: Settings | null) {
 
         case 'stt.final':
           setPartial('');
+          setHint(null);
           setMessages((previous) => [
             ...previous,
             { id: nextId(), role: 'user', text: frame.text },
           ]);
           break;
+
+        case 'wake.required':
+          // Server nghe thấy nhưng không trả lời vì chưa được gọi tên. Hiện gợi ý
+          // kèm ví dụ cụ thể — "hãy gọi tên tôi" mà không nói gọi thế nào thì
+          // người dùng đoán tiếp, và đoán sai lần nữa.
+          setAssistantName(frame.assistant_name);
+          setWakeWordRequired(true);
+          setConversationOpen(false);
+          setHint(
+            `Mình chỉ trả lời khi được gọi tên. Hãy thử: “${frame.assistant_name} ơi, bật đèn phòng khách”.`
+          );
+          break;
+
+        case 'wake.active': {
+          setAssistantName(frame.assistant_name);
+          setHint(null);
+          setConversationOpen(true);
+          // Cửa sổ trò chuyện do server quyết định; app chỉ phản chiếu lại nó,
+          // nên hết giờ thì nhãn "không cần gọi tên" cũng phải tắt theo.
+          if (wakeWindowRef.current) clearTimeout(wakeWindowRef.current);
+          wakeWindowRef.current = setTimeout(
+            () => setConversationOpen(false),
+            Math.max(1, frame.follow_up_s) * 1000
+          );
+          break;
+        }
 
         case 'assistant.delta':
           appendAssistantDelta(frame.text);
@@ -479,6 +517,7 @@ export function useVoiceSession(settings: Settings | null) {
     setMessages([]);
     setPartial('');
     setError(null);
+    setHint(null);
   }, [speech]);
 
   // Connect once settings are loaded, and reconnect when they change.
@@ -496,6 +535,13 @@ export function useVoiceSession(settings: Settings | null) {
 
   useEffect(() => () => speech.stop(), [speech]);
 
+  useEffect(
+    () => () => {
+      if (wakeWindowRef.current) clearTimeout(wakeWindowRef.current);
+    },
+    []
+  );
+
   return {
     state,
     messages,
@@ -504,6 +550,10 @@ export function useVoiceSession(settings: Settings | null) {
     speaking,
     level,
     error,
+    hint,
+    assistantName,
+    wakeWordRequired,
+    conversationOpen,
     capturingClip,
     startCaptureClip,
     stopCaptureClip,
@@ -515,6 +565,7 @@ export function useVoiceSession(settings: Settings | null) {
     sendText,
     clear,
     dismissError: () => setError(null),
+    dismissHint: () => setHint(null),
     describeCommand,
   };
 }

@@ -213,6 +213,78 @@ Câu nói kết thúc khi xảy ra **một trong ba**: client gửi `audio.end`,
 báo hết giọng nói, hoặc bộ phát hiện im lặng của server quyết định (ngưỡng năng
 lượng tự thích nghi theo tiếng ồn phòng).
 
+### Cổng kiểm soát: gọi đúng tên, đúng người
+
+Mic trên board không có nút bấm — nó nghe cả ngày, nên **mọi câu nhận dạng được đều
+phải qua `app/services/voice_gate.py`** trước khi thành lệnh. Hai câu hỏi, theo đúng
+thứ tự này:
+
+1. **Có gọi mình không?** Câu nói phải có tên trợ lý (`ASSISTANT_NAME`, mặc định
+   "Anh Thạc Sĩ"), hoặc cuộc trò chuyện mở bởi lần gọi trước còn hiệu lực. Rẻ: chỉ
+   so chuỗi.
+2. **Ai đang nói?** Vân giọng phải khớp một hồ sơ đã đăng ký. Đắt: FFT trên cả câu
+   nói — nên nó chạy sau.
+
+Không gọi tên thì server **im lặng tuyệt đối**, chỉ gửi khung `wake.required` để app
+nhắc nhẹ. Một căn hộ trả lời mọi câu nó nghe lỏm còn tệ hơn vấn đề mà từ khoá đánh
+thức giải quyết.
+
+```
+client ──► <PCM "bật đèn phòng khách">
+server ──► {"type":"stt.final","text":"bật đèn phòng khách"}
+server ──► {"type":"wake.required","assistant_name":"Anh Thạc Sĩ"}   ← hết, không làm gì
+
+client ──► <PCM "Anh Thạc Sĩ, bật đèn phòng khách">
+server ──► {"type":"wake.active","follow_up_s":30}                   ← mở cuộc trò chuyện
+server ──► {"type":"assistant.delta", ...}                           ← LLM chỉ thấy "bật đèn phòng khách"
+```
+
+Nhận tên bằng **so khớp tỉ lệ trên chuỗi đã bỏ dấu**, không phải `==`. Bộ nhận dạng
+viết tên này mỗi lúc một khác — "Anh Thạc Sĩ", "anh thạc sỹ", "anh thạch sĩ", "anh
+thác sĩ" — và so khớp tuyệt đối chỉ bắt được khoảng một nửa số lần gọi thật. Tên chỉ
+được chấp nhận ở **đầu câu (trong 2 từ đầu) hoặc cuối câu**; nằm giữa câu thì đó là
+đang nói *về* ai đó chứ không phải nói *với* ai, nên "mai mình nộp luận văn thạc sĩ
+rồi" không đánh thức căn hộ.
+
+Ba trường hợp **không cần gọi tên**:
+
+- Câu tiếp theo trong `WAKE_FOLLOW_UP_S` giây sau lần gọi trước (mặc định 30 s).
+  Không ai gọi tên hai lần liên tiếp; bắt buộc như vậy là không dùng được.
+- Trả lời một thao tác nhạy cảm đang chờ xác nhận. Trợ lý vừa hỏi xong, "vâng" là
+  câu trả lời cho nó — bắt gọi lại tên mới xác nhận được là cách để quên khoá cửa.
+- Khung `text` gõ tay: người dùng mở app và bấm gửi, đã đủ là chủ đích.
+
+| Biến môi trường | Mặc định | Ý nghĩa |
+|---|---|---|
+| `ASSISTANT_NAME` | `Anh Thạc Sĩ` | Tên trợ lý tự xưng **và** từ khoá đánh thức. Đổi là đổi cả hai, kể cả câu mẫu lúc đăng ký giọng |
+| `WAKE_WORD_ENABLED` | `true` | Tắt thì mọi câu nghe được đều thành lệnh |
+| `WAKE_WORD_ALIASES` | rỗng | Cách viết khác muốn chấp nhận thêm, ngăn bằng dấu phẩy |
+| `WAKE_WORD_THRESHOLD` | `0.82` | Độ giống tối thiểu. Thấp hơn: dễ gọi nhưng dễ tự bật |
+| `WAKE_FOLLOW_UP_S` | `30` | Cửa sổ trò chuyện. `0` = mọi câu đều phải gọi tên |
+
+Server đang nghe tên nào thì `GET /api/v1/system/info` → `assistant` mới là sự thật,
+`.env` thì không — nó có thể bị secrets của Fly ghi đè.
+
+### Sinh trắc học giọng nói
+
+`app/services/speaker.py` dựng vân giọng 32 chiều bằng Python thuần (MFCC + độ lệch
+filterbank + dải cao độ), không kéo theo PyTorch nào. Người dùng đăng ký bằng cách
+**đọc vài câu mẫu do server cấp** qua `GET /api/v1/speakers/enrollment`; app chỉ hiển
+thị, không tự viết câu — các câu đó mang tên trợ lý nên đổi tên là đổi luôn nội dung
+phải đọc.
+
+| Biến môi trường | Mặc định | Ý nghĩa |
+|---|---|---|
+| `VOICE_VERIFICATION_ENABLED` | `true` | Bật sẵn nhưng vô hại khi chưa ai đăng ký: không có hồ sơ thì mọi giọng đều qua, nên bản clone mới vẫn chạy demo được. Có hồ sơ đầu tiên là bắt đầu siết |
+| `VOICE_VERIFICATION_THRESHOLD` | `0.75` | Ngưỡng tương đồng cosine |
+| `VOICE_ENROLLMENT_SAMPLES` | `3` | Số câu phải đọc để hồ sơ coi như xong |
+| `VOICE_ENROLLMENT_REQUIRED` | `false` | Bật để **từ chối mọi lệnh giọng nói** khi chưa ai đăng ký. Tắt mặc định để server chưa cấu hình vẫn demo được; app mobile tự chặn người dùng mới ở màn hình đăng ký bất kể cờ này |
+
+Vân giọng **đo trên âm thanh thô**, còn nhận dạng thì đo trên âm thanh đã lọc nhiễu:
+app đăng ký bằng PCM thô qua REST, nên đo vân giọng sau bộ lọc là so hồ sơ dựng theo
+một đường với câu nói đo theo đường khác — triệu chứng tệ nhất có thể, chủ nhà đăng
+ký thành công rồi bị chính nhà mình phớt lờ.
+
 ### Barge-in
 Một khung âm thanh đến trong lúc trợ lý đang nói sẽ **hủy ngay lượt đang chạy**:
 dừng TTS, dừng gửi audio, và mở câu nói mới. Không cần chờ TTS xả hết.
@@ -239,6 +311,12 @@ Tất cả dưới `/api/v1`. Xác thực: `Authorization: Bearer <API_KEY>` ho�
 | `GET` | `/api/v1/chat/{session_id}` | Lịch sử phiên |
 | `DELETE` | `/api/v1/chat/{session_id}` | Xoá phiên |
 | `POST` | `/api/v1/speak` | Tổng hợp giọng nói cho văn bản bất kỳ (WAV/MP3) |
+| `GET` | `/api/v1/speakers` | Danh sách hồ sơ giọng nói đã đăng ký |
+| `GET` | `/api/v1/speakers/enrollment?speaker_id=` | Các câu người dùng mới phải đọc, và đã đọc được bao nhiêu |
+| `POST` | `/api/v1/speakers/enroll` | Nạp một mẫu giọng (PCM16 16 kHz, base64) kèm `phrase_index` |
+| `POST` | `/api/v1/speakers/verify` | Thử nhận diện một đoạn giọng, trả về điểm tương đồng |
+| `DELETE` | `/api/v1/speakers/{id}` | Xoá hồ sơ giọng nói |
+| `PATCH` | `/api/v1/speakers/settings` | Bật/tắt xác thực giọng và chỉnh ngưỡng lúc đang chạy |
 | `GET` | `/api/v1/logs?after=` | Vòng đệm log gần nhất kèm nguyên vẹn các trường `extra`. **Cần xác thực** |
 | `GET` | `/logs` | Trang xem log trực tiếp. Bản thân trang không mang dữ liệu, nó hỏi API key rồi tự poll |
 

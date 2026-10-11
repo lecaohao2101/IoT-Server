@@ -12,6 +12,11 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Provider = Literal["google", "mock"]
 
+#: Who the apartment is, when nothing overrides it. Shared with the wake-word
+#: detector and the model prompt so the name the user must say and the name the
+#: assistant answers to can never drift apart.
+DEFAULT_ASSISTANT_NAME = "Anh Thạc Sĩ"
+
 
 class Settings(BaseSettings):
     """Every knob the server exposes. Flat on purpose: one env var per knob."""
@@ -108,9 +113,38 @@ class Settings(BaseSettings):
     tts_chunk_bytes: int = 3200  # 100 ms of 16 kHz mono PCM16
 
     # ----------------------------------------------------------- voice biometrics
-    voice_verification_enabled: bool = False
+    #: On by default, and harmless until somebody enrolls: with no profiles the
+    #: verifier admits everyone, so a fresh clone still demos. The moment a voice
+    #: is registered from the app it starts being enforced -- which is the point
+    #: of registering one, and leaving it off would make enrollment look broken.
+    voice_verification_enabled: bool = True
     voice_verification_threshold: float = 0.75
     voice_profiles_path: Path = Path("config/speakers.json")
+    #: How many samples a profile needs before the app stops asking for more.
+    #: One clip is enough to verify against; three spread across different
+    #: sentences is what makes the embedding survive a cold or a different room.
+    voice_enrollment_samples: int = 3
+    #: Refuse voice commands outright while nobody has enrolled. Off by default
+    #: so the offline demo runs with no setup; on, it is what makes enrollment
+    #: in the app genuinely mandatory rather than merely the first screen.
+    voice_enrollment_required: bool = False
+
+    # -------------------------------------------------------------- wake word
+    #: Who the apartment is. Spoken back to the user, written into the model's
+    #: prompt, and the name the wake-word detector listens for.
+    assistant_name: str = DEFAULT_ASSISTANT_NAME
+    #: The microphone board has no button: without this every sentence in the
+    #: room becomes a command.
+    wake_word_enabled: bool = True
+    #: Extra spellings to accept, beyond the ones derived from the name.
+    wake_word_aliases: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    #: Similarity a window of the utterance needs to count as the name. Lower
+    #: admits more misrecognitions along with more false wakes.
+    wake_word_threshold: float = 0.82
+    #: How long a conversation stays open after a summon. Nobody says the name
+    #: twice in a row, so follow-up sentences land inside this window. 0 makes
+    #: every single turn require the name.
+    wake_follow_up_s: float = 30.0
 
     #: Log what was recognised and what was synthesised, not just the byte counts.
     #: Transcripts are recorded speech, so set LOG_TRANSCRIPTS=false where that
@@ -127,7 +161,7 @@ class Settings(BaseSettings):
     max_audio_bytes_per_utterance: int = 16000 * 2 * 30  # 30 s hard ceiling
 
     # ------------------------------------------------------------ parsing
-    @field_validator("cors_origins", "stt_alt_languages", mode="before")
+    @field_validator("cors_origins", "stt_alt_languages", "wake_word_aliases", mode="before")
     @classmethod
     def _split_csv(cls, v: Any) -> Any:
         if isinstance(v, str):

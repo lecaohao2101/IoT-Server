@@ -15,9 +15,28 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.config import DEFAULT_ASSISTANT_NAME
 from app.domain.home import Capability, CapabilityKind, HomeConfig
 
 _WEEKDAYS_VI = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
+
+
+def identity_block(assistant_name: str) -> str:
+    """Who the model is when it is asked.
+
+    The wake word already decided *whether* to answer; this is so the answer to
+    "bạn tên gì?" is the same name the user has to say to be heard. Getting
+    those two out of step is how a user ends up calling a name the gate does not
+    know.
+    """
+    name = (assistant_name or DEFAULT_ASSISTANT_NAME).strip()
+    return (
+        f"DANH TÍNH\n"
+        f'- Tên của bạn là "{name}". Người dùng gọi đúng tên này thì bạn mới bắt đầu trò chuyện.\n'
+        f'- Khi được hỏi tên, hãy trả lời tự nhiên rằng bạn là "{name}".\n'
+        f"- Tên gọi đứng đầu câu chỉ để đánh thức bạn; đừng nhắc lại hay bình luận về nó, "
+        f"hãy trả lời thẳng vào nội dung người dùng cần."
+    )
 
 SYSTEM_HEADER = """\
 Bạn là người bạn trợ lý thông minh cùng chung sống trong căn hộ, trò chuyện bằng tiếng Việt thân mật, chu đáo và thấu cảm như 2 con người đang trò chuyện với nhau.
@@ -145,6 +164,7 @@ def build_system_prompt(
     current_room: str | None = None,
     quiet_hours: bool = False,
     policy_notes: list[str] | None = None,
+    assistant_name: str = DEFAULT_ASSISTANT_NAME,
 ) -> str:
     rooms = home.room_map
     room_line = "không xác định"
@@ -156,6 +176,7 @@ def build_system_prompt(
     all_rooms_desc = ", ".join(f"{r.name} ({r.id})" for r in home.rooms)
 
     sections = [
+        identity_block(assistant_name),
         SYSTEM_HEADER,
         (
             f"BỐI CẢNH\n"

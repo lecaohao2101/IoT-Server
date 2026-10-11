@@ -54,6 +54,13 @@ export type Settings = {
   room: string;
   /** Stable id so the conversation survives app restarts. */
   sessionId: string;
+  /**
+   * Hồ sơ giọng nói mà máy này đã đăng ký trên server. Rỗng nghĩa là người dùng
+   * chưa đăng ký giọng -- app sẽ chặn ở màn hình đăng ký cho tới khi xong.
+   */
+  speakerId: string;
+  /** Tên hiển thị của người đã đăng ký giọng trên máy này. */
+  speakerName: string;
   /** Cấu hình kết nối MQTT trực tiếp */
   mqtt: MqttSettings;
 };
@@ -66,6 +73,8 @@ export const DEFAULT_SETTINGS: Settings = {
   token: '',
   room: 'living_room',
   sessionId: `mobile-${Math.random().toString(36).slice(2, 10)}`,
+  speakerId: '',
+  speakerName: '',
   mqtt: DEFAULT_MQTT_SETTINGS,
 };
 

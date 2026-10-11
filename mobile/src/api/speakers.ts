@@ -11,6 +11,36 @@ export type SpeakerSummary = {
   role: SpeakerRole;
   samples_count: number;
   created_at: string;
+  /** Đã đọc đủ số câu mẫu chưa. Còn false thì màn hình đăng ký vẫn phải hiện. */
+  complete?: boolean;
+  remaining_samples?: number;
+};
+
+export type EnrollmentPhrase = {
+  index: number;
+  text: string;
+};
+
+/**
+ * Kịch bản đăng ký giọng do server quyết định.
+ *
+ * Các câu mẫu KHÔNG nằm trong app: chúng mang tên trợ lý, nên đổi tên trợ lý ở
+ * server là đổi luôn nội dung người dùng phải đọc, không cần phát hành lại app.
+ */
+export type EnrollmentPlan = {
+  required: boolean;
+  satisfied: boolean;
+  assistant_name: string;
+  wake_word_enabled: boolean;
+  verification_enabled: boolean;
+  required_samples: number;
+  completed_samples: number;
+  phrases: EnrollmentPhrase[];
+  sample_rate: number;
+  channels: number;
+  encoding: string;
+  min_sample_ms: number;
+  enrolled_total: number;
 };
 
 export type SpeakersListResponse = {
@@ -44,12 +74,26 @@ export async function fetchSpeakers(settings: Settings): Promise<SpeakersListRes
   return (await res.json()) as SpeakersListResponse;
 }
 
+export async function fetchEnrollmentPlan(
+  settings: Settings,
+  speakerId?: string
+): Promise<EnrollmentPlan> {
+  const query = speakerId ? `?speaker_id=${encodeURIComponent(speakerId)}` : '';
+  const url = httpUrl(settings, `/api/v1/speakers/enrollment${query}`);
+  const res = await fetch(url, { method: 'GET', headers: { ...authHeaders(settings) } });
+  if (!res.ok) {
+    throw new Error(`Không lấy được hướng dẫn đăng ký giọng nói (${res.status})`);
+  }
+  return (await res.json()) as EnrollmentPlan;
+}
+
 export async function enrollSpeaker(
   settings: Settings,
   speakerId: string,
   name: string,
   role: SpeakerRole,
-  pcmBytes: Uint8Array
+  pcmBytes: Uint8Array,
+  phraseIndex?: number
 ): Promise<SpeakerSummary> {
   const url = httpUrl(settings, '/api/v1/speakers/enroll');
   const base64Audio = uint8ArrayToBase64(pcmBytes);
@@ -64,6 +108,7 @@ export async function enrollSpeaker(
       name,
       role,
       audio_base64: base64Audio,
+      phrase_index: phraseIndex,
     }),
   });
   if (!res.ok) {

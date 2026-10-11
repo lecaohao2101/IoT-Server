@@ -94,7 +94,7 @@ def test_upload_audio_short_payload_rejected(client: TestClient) -> None:
 
 def test_upload_audio_executes_voice_command(client: TestClient) -> None:
     # Under mock STT, valid UTF-8 prose becomes the recognized transcript
-    audio_text = "bật đèn phòng khách".encode()
+    audio_text = "Anh Thạc Sĩ, bật đèn phòng khách".encode()
     padding = b" " * 120  # ensure > 100 bytes
     res = client.post("/upload-audio", content=audio_text + padding)
     assert res.status_code == 200
@@ -134,3 +134,45 @@ def test_upload_audio_survives_an_stt_provider_failure(client: TestClient) -> No
     assert data["success"] is False
     assert data["error"] == "stt_failed"
     assert data["response"]
+
+
+def test_upload_audio_ignores_a_sentence_not_addressed_to_the_assistant(
+    client: TestClient,
+) -> None:
+    """The ESP32 route takes no credential, so the gate is the only guard on it.
+
+    A passer-by saying "bật đèn phòng khách" near the balcony mic must get the
+    same silence a stranger's voice gets, and the lights must not move.
+    """
+    before = client.get("/api/v1/devices/living_room_light").json()["state"]["power"]
+
+    res = client.post("/upload-audio", content="bật đèn phòng khách".encode() + b" " * 120)
+
+    assert res.status_code == 200, "the firmware only reads JSON out of a 200"
+    data = res.json()
+    assert data["success"] is False
+    assert data["error"] == "wake_word_required"
+    assert data["response"] == "", "nothing may be spoken at an overheard sentence"
+    assert data["transcript"], "the serial console still needs to show what was heard"
+    assert client.get("/api/v1/devices/living_room_light").json()["state"]["power"] == before
+
+
+def test_upload_audio_answers_a_bare_summons(client: TestClient) -> None:
+    res = client.post("/upload-audio", content="Anh Thạc Sĩ ơi".encode() + b" " * 120)
+
+    data = res.json()
+    assert data["success"] is True
+    assert "Anh Thạc Sĩ" in data["response"]
+    assert data["error"] is None
+
+
+def test_upload_audio_follow_up_needs_no_name(client: TestClient) -> None:
+    """One session id for the board, so the window opened by the summon holds."""
+    client.post("/upload-audio", content="Anh Thạc Sĩ, bật đèn phòng khách".encode() + b" " * 120)
+
+    res = client.post("/upload-audio", content="tắt đèn phòng khách".encode() + b" " * 120)
+    data = res.json()
+
+    assert data["success"] is True
+    assert data["states"]["lr_main"] == 0
+
