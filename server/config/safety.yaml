@@ -13,6 +13,16 @@ max_commands_per_plan: 8
 max_delay_s: 3600
 require_device_online: false      # bật true nếu muốn từ chối lệnh tới thiết bị mất kết nối
 
+# Hỏi lại trước MỌI lệnh, không riêng thao tác nhạy cảm.
+#
+# Trợ lý đề xuất -> người dùng "ừ" -> lệnh mới xuống thiết bị. Đây là luật chứ
+# không phải lời dặn trong prompt: mô hình có thể bị dẫn dụ bỏ qua một câu hỏi,
+# còn luật này chạy sau nó, nên không lệnh nào chạm tới rơ-le mà chưa có tiếng
+# "vâng". Nút bấm trên app KHÔNG bị ảnh hưởng -- cái chạm đó đã là xác nhận rồi.
+#
+# Đặt false để quay về nếp cũ: làm ngay, chỉ hỏi với thao tác nhạy cảm.
+confirm_all: true
+
 quiet_hours:
   enabled: true
   start: "22:00"

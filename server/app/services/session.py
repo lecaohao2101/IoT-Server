@@ -444,11 +444,17 @@ class VoiceSession(TurnSink):
             await self._start_turn(final_text)
             return
 
+        # Cùng lý do như đường HTTP của firmware: board không đăng ký giọng được
+        # nên không có mẫu nào hợp lý để so. Nhận ra "đây là board" qua principal
+        # chứ không qua đường truyền, để board nối bằng WebSocket cũng được đối xử
+        # như nhau.
+        from_device = self._principal is not None and getattr(self._principal, "is_device", False)
         decision = self._gate.evaluate(
             session_id=self.session_id,
             text=final_text,
             audio=b"".join(self._utterance_frames),
             has_pending=await self._orchestrator.has_pending(self.session_id),
+            verify_speaker=self._s.voice_verification_on_device if from_device else True,
         )
         log.info(
             "voice gate decision",

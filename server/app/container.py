@@ -104,7 +104,7 @@ class AppContainer:
         apply_google_credentials(settings)
         stt = build_recognizer(settings)
         tts = build_synthesizer(settings)
-        llm = build_language_model(settings, home)
+        llm = build_language_model(settings, home, confirm_all=policy.confirm_all)
         log.info(
             "ai providers ready",
             extra={"stt": stt.name, "tts": tts.name, "llm": llm.name},

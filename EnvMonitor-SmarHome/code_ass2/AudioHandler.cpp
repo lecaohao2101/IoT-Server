@@ -68,7 +68,7 @@ static int captureFrame() {
   return count;
 }
 
-#if __has_include(<WebSocketsClient.h>)
+#if __has_include(<WebSocketsClient.h>) && ENABLE_VOICE_ASSISTANT
 #include <WebSocketsClient.h>
 
 static WebSocketsClient ws;
@@ -288,23 +288,17 @@ void voiceLoop() {
 
 #else
 
-// Thiếu thư viện thì cả đường tiếng nói biến mất khỏi firmware. Trước đây chuyện
-// đó chỉ lộ ra trên Serial lúc chạy, nên đọc như "board không gọi server".
-// Cảnh báo ngay lúc biên dịch để không bao giờ nạp nhầm một bản firmware câm.
-#warning "Khong tim thay WebSocketsClient.h -- tro ly giong noi bi loai khoi firmware. Cai thu vien 'WebSockets' (Markus Sattler)."
-
 void voiceBegin() {
-  Serial.println("[VOICE] ===> CANH BAO: Firmware nay KHONG co phan tro ly giong noi! <===");
-  Serial.println("[VOICE] Thieu thu vien 'WebSockets' cua Markus Sattler luc bien dich.");
+  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang TAT (ENABLE_VOICE_ASSISTANT = 0).");
 }
 
 void voiceLoop() {
-  // Vẫn rút mic để mức âm thanh trên LCD và telemetry tiếp tục cập nhật.
+  // Vẫn rút mic để mức âm thanh trên LCD và telemetry tiếp tục cập nhật, không gửi mạng
   captureFrame();
 }
 
 void voiceRequestTalk() {
-  Serial.println("[VOICE] Chưa có thư viện WebSockets -- bỏ qua yêu cầu nói.");
+  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang TAT. Bo qua yeu cau noi.");
 }
 
 bool voiceIsConnected() { return false; }

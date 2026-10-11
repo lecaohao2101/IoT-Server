@@ -142,6 +142,7 @@ class VoiceGate:
         text: str,
         audio: bytes = b"",
         has_pending: bool = False,
+        verify_speaker: bool = True,
     ) -> GateResult:
         """Decide what to do with one recognised utterance.
 
@@ -149,6 +150,10 @@ class VoiceGate:
         Such a reply bypasses the name: the assistant asked the question a second
         ago, and making the user re-summon in order to answer it would be a way
         to leave a door unlocked by accident.
+
+        ``verify_speaker=False`` turns off the biometric half for this utterance
+        only -- the ESP32 board uses it, because nobody can enroll a voice from a
+        board with no screen. The wake word still applies either way.
         """
         utterance = (text or "").strip()
         if not utterance:
@@ -178,7 +183,7 @@ class VoiceGate:
         if enrollment is not None:
             return enrollment
 
-        verification = self._verify(audio)
+        verification = self._verify(audio) if verify_speaker else None
         if verification is not None and not verification.verified:
             log.warning(
                 "voice command rejected -- unauthorized speaker",

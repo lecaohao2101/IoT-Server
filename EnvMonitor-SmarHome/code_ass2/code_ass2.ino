@@ -57,6 +57,9 @@ void loop() {
   // Phải chạy mỗi vòng -- DMA của mic chỉ giữ được 128 ms tiếng.
   voiceLoop();
 
+  // Tự động ngắt xung PWM cho Servo sau khi quay xong (chống rè, chống sụt áp)
+  updateServos();
+
   // Đọc nút bấm liên tục (Real-time)
   handleButtons();
 
@@ -86,15 +89,11 @@ void loop() {
 
     Serial.printf("INMP441 | Mức âm thanh: %d\n", soundLevel);
 
-    // Giữ Wi-Fi sống và cho LCD nói đúng sự thật. Dòng 0 của LCD phòng khách
-    // trước đây đứng nguyên thông báo lúc khởi động, nên "WiFi: Offline" vẫn
-    // nằm đó rất lâu sau khi mạng đã nối lại.
+    // Giữ Wi-Fi sống và cập nhật trạng thái thiết bị thời gian thực & cảm biến lên 2 LCD
     bool wifiOk = wifiEnsureConnected();
-    updateLCDWiFiStatus(wifiOk);
-
-    // Cập nhật màn hình LCD tại chỗ (không gửi API HTTP)
-    updateLCDLivingRoom(temp, hum, isDhtValid);
-    updateLCDBedroom(dist, soundLevel);
+    refreshLCDDevices(wifiOk);
+    updateLCDLivingRoomSensors(temp, hum, isDhtValid);
+    updateLCDBedroomSensors(dist, soundLevel);
 
     // Lọc biến động cảm biến và chỉ gửi API khi dữ liệu HỢP LỆ & THAY ĐỔI
     checkAndSendSensors(temp, hum, isDhtValid, dist, soundLevel);

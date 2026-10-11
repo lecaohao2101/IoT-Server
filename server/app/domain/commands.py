@@ -85,6 +85,13 @@ class CommandPlan(BaseModel):
     rejected: tuple[RejectedCommand, ...] = ()
     pending_confirmation: tuple[ValidatedCommand, ...] = ()
     notes: tuple[str, ...] = ()
+    #: Câu hỏi xác nhận, đã gộp toàn bộ lệnh đang treo thành một.
+    #:
+    #: Tách khỏi `notes` vì hai thứ này đi về hai hướng khác nhau: `notes` là
+    #: những điều cần nói thêm, còn đây là câu PHẢI hỏi và phải được trả lời. Đọc
+    #: ké `notes[0]` thì chỉ cần một lệnh bị kẹp giá trị là câu hỏi biến thành
+    #: "Lưu ý: đã giảm độ sáng xuống 40".
+    confirm_prompt: str = ""
 
     @property
     def is_empty(self) -> bool:
@@ -113,6 +120,7 @@ class CommandPlan(BaseModel):
             "pending_confirmation": [c.model_dump() for c in self.pending_confirmation],
             "rejected": [r.as_dict() for r in self.rejected],
             "notes": list(self.notes),
+            "confirm_prompt": self.confirm_prompt,
         }
 
 

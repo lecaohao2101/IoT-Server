@@ -142,6 +142,12 @@ class SafetyPolicy(BaseModel):
     max_commands_per_plan: int = Field(default=8, ge=1, le=64)
     max_delay_s: float = Field(default=3600.0, ge=0.0)
     require_device_online: bool = False
+    #: Hỏi lại trước MỌI lệnh, không riêng gì thao tác nhạy cảm.
+    #:
+    #: Đây là luật, không phải lời dặn trong prompt: mô hình có thể bị dẫn dụ bỏ
+    #: qua một câu hỏi, còn luật này chạy sau nó. Bật lên thì không có lệnh nào
+    #: chạm tới rơ-le mà chưa có một tiếng "vâng" của người dùng.
+    confirm_all: bool = False
     quiet_hours: QuietHours = Field(default_factory=QuietHours)
     limits: tuple[LimitRule, ...] = ()
     forbid: tuple[ForbidRule, ...] = ()

@@ -60,6 +60,68 @@ def test_an_ordinary_sentence_does_not_wake_it(detector, said: str):
     assert detector.detect(said).matched is False
 
 
+# --------------------------------------------------- nghe nham, nhung van goi
+@pytest.mark.parametrize(
+    "said",
+    [
+        # Nguyên văn một lần gọi thật trên điện thoại: bộ nhận dạng gộp "Thạc Sĩ"
+        # thành một tiếng "taxi". Ở dạng chữ hai chuỗi chỉ giống 0.64, nên trước
+        # khi có lớp so theo âm thì căn hộ im lặng và người dùng không hiểu vì sao.
+        "Anh taxi ơi, mở cửa",
+        "anh tắc xi ơi, mở cửa",
+        "Anh tác si ơi, mở cửa",
+        "Anh Tắc Sỹ, mở cửa",
+    ],
+)
+def test_the_recogniser_mangling_the_name_still_wakes_it(detector, said: str):
+    match = detector.detect(said)
+    assert match.matched, f"{said!r} bị bỏ qua (điểm {match.score})"
+    assert match.command == "mở cửa"
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        # Những câu này từng đánh thức nhầm khi lớp so theo âm còn nới tay. Mỗi
+        # câu là một kiểu nới khác nhau, nên giữ cả bốn.
+        "anh thấy sao",                 # th/t + vần gần giống
+        "anh tài xế đang ở đâu rồi",    # cùng bộ phụ âm t...x
+        "anh ta xin nghỉ rồi",          # "ta xin" nghe như "thạc sĩ"
+        "anh ấy là thạc sĩ kinh tế",    # cửa sổ lệch pha "la thac si"
+        "em đang học cao học thạc sĩ",  # "thạc sĩ" là tấm bằng, lại ở cuối câu
+        "gọi taxi giúp anh với",
+        "xe taxi đỗ ngoài cổng",
+    ],
+)
+def test_everyday_speech_does_not_wake_it(detector, said: str):
+    """Lớp so theo âm phải mở đủ rộng cho lời gọi, không rộng hơn.
+
+    Đây là ranh giới hẹp: nới thêm một chút là căn hộ tự bật đèn giữa lúc hai
+    người đang nói chuyện với nhau.
+    """
+    assert detector.detect(said).matched is False
+
+
+def test_the_phonetic_key_folds_sounds_vietnamese_does_not_distinguish():
+    from app.services.wakeword import phonetic_key
+
+    # Cùng một âm, hai cách viết: đây chính là thứ bắc cầu "taxi" sang "thạc sĩ".
+    assert phonetic_key("thạc sĩ") == phonetic_key("tắc xi")
+    assert phonetic_key("anh") == phonetic_key("ăn")
+    # Nhưng vần khác nhau thì vẫn phải khác nhau, nếu không mọi câu đều giống nhau.
+    assert phonetic_key("thạc sĩ") != phonetic_key("thấy sao")
+
+
+def test_a_window_must_line_up_on_the_first_syllable(detector):
+    """Khớp phải thẳng hàng từ tiếng đầu, không trượt vào giữa câu.
+
+    "la thac si" giống "anh thac si" tới 0.857 chỉ vì 8 trên 11 ký tự cuối trùng
+    nhau -- nhưng người gọi thì bắt đầu bằng tiếng đầu của cái tên.
+    """
+    assert detector.detect("anh ấy là thạc sĩ kinh tế").matched is False
+    assert detector.detect("anh thạc sĩ bật đèn").matched is True
+
+
 def test_the_name_can_come_at_the_end(detector):
     match = detector.detect("bật đèn phòng ngủ giúp mình nhé, Anh Thạc Sĩ")
     assert match.matched

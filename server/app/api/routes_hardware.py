@@ -281,6 +281,11 @@ async def upload_audio(request: Request, container: Container) -> dict[str, Any]
         text=user_text,
         audio=body,
         has_pending=await container.orchestrator.has_pending(HARDWARE_SESSION_ID),
+        # Vân giọng mặc định TẮT trên board: không ai đăng ký giọng được từ một
+        # board không có màn hình, nên mẫu duy nhất để so là mẫu thu bằng mic
+        # điện thoại -- khác mic, khác phòng, khác khoảng cách. Bật lại bằng
+        # VOICE_VERIFICATION_ON_DEVICE=true. Từ khoá đánh thức vẫn luôn áp dụng.
+        verify_speaker=container.settings.voice_verification_on_device,
     )
     log.info(
         "voice gate decision",

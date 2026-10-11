@@ -75,18 +75,41 @@ class RecordingSink(TurnSink):
         return "".join(self.deltas)
 
 
-def orchestrator_with(container, llm: LanguageModel) -> Orchestrator:
+def orchestrator_with(
+    container, llm: LanguageModel, *, confirm_all: bool = False
+) -> Orchestrator:
+    """Orchestrator với `confirm_all` TẮT theo mặc định.
+
+    Phần lớn test trong file này kiểm tra đường ống: gộp lệnh thành một message
+    MQTT, đánh dấu trạng thái mong muốn, lên lịch lệnh trễ, nuốt lỗi provider. Để
+    `confirm_all` bật thì mọi lượt đều dừng ở câu hỏi và không có gì xuống tới
+    MQTT -- che mất đúng thứ chúng đang kiểm tra.
+
+    Hành trình xác nhận hai bước có mục riêng ở cuối file, bật cờ này lên.
+    """
+    from app.safety.validator import CommandValidator
+
+    policy = container.policy.model_copy(update={"confirm_all": confirm_all})
     return Orchestrator(
         home=container.home,
-        policy=container.policy,
+        policy=policy,
         llm=llm,
         tts=container.tts,
-        validator=container.validator,
+        validator=CommandValidator(container.home, policy),
         state=container.state,
         conversations=container.conversations,
         bridge=container.bridge,
         bus=container.bus,
     )
+
+
+def proposed(plan):
+    """Lệnh mà lượt này đề xuất, dù đã gửi đi hay còn chờ xác nhận.
+
+    Test nào hỏi "bộ suy luận có hiểu câu này không" thì phải dùng cái này: câu
+    trả lời không được đổi theo việc chính sách có bắt hỏi lại hay không.
+    """
+    return list(plan.accepted) + list(plan.pending_confirmation)
 
 
 # ------------------------------------------------------------------ happy path
@@ -393,7 +416,8 @@ async def test_unmapped_topic_is_ignored(container):
 
 async def test_delayed_command_is_scheduled_not_awaited(container):
     plan = container.validator.validate(
-        [Command(device_id="kitchen_light", capability="power", value="on", delay_s=0.1)]
+        [Command(device_id="kitchen_light", capability="power", value="on", delay_s=0.1)],
+        confirm_all=False,  # test này nói về việc hẹn giờ gửi, không về việc hỏi lại
     )
     before = len(container.transport.sent)
     report = await container.bridge.dispatch(plan)
@@ -434,7 +458,7 @@ async def test_empty_text_turn_is_a_no_op(container):
 @pytest.mark.parametrize("text", ["bật đèn phòng khách", "tắt hết đèn", "mở rèm phòng ngủ"])
 async def test_offline_reasoner_handles_common_phrasings(container, text):
     result = await container.orchestrator.run_turn(session_id="s15", user_text=text)
-    assert result.plan is not None and result.plan.accepted, text
+    assert result.plan is not None and proposed(result.plan), text
 
 
 async def test_offline_reasoner_carries_the_subject_across_turns(container):
@@ -443,15 +467,18 @@ async def test_offline_reasoner_carries_the_subject_across_turns(container):
     first = await orchestrator.run_turn(
         session_id="s16", user_text="bật đèn phòng khách lên 70 phần trăm"
     )
-    assert first.plan.accepted[0].device_id == "living_room_light"
+    assert proposed(first.plan)[0].device_id == "living_room_light"
 
     second = await orchestrator.run_turn(session_id="s16", user_text="giảm xuống 20 phần trăm")
-    assert second.plan.accepted[0].device_id == "living_room_light"
-    assert second.plan.accepted[0].value == 20
+    # Tìm theo thuộc tính chứ không lấy lệnh đầu tiên: bộ suy luận có thể kèm
+    # thêm lệnh bật nguồn, và thứ tự ấy không phải điều test này muốn chốt.
+    dimmed = next(c for c in proposed(second.plan) if c.capability == "brightness")
+    assert dimmed.device_id == "living_room_light"
+    assert dimmed.value == 20
 
     third = await orchestrator.run_turn(session_id="s16", user_text="tắt đi")
-    assert third.plan.accepted[0].capability == "power"
-    assert third.plan.accepted[0].value == "off"
+    assert proposed(third.plan)[0].capability == "power"
+    assert proposed(third.plan)[0].value == "off"
 
 
 async def test_offline_reasoner_unlocks_and_locks_the_door(container):

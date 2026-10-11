@@ -61,6 +61,19 @@ struct MicUploadResult {
 
 MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration_ms);
 
+// Việc cần làm trong lúc đứng chờ server trả lời.
+//
+// Gửi xong câu nói, firmware chặn ở vòng đọc phản hồi cho tới khi server chạy
+// xong STT + trợ lý + TTS -- vài giây. Nhưng server đã bắt đầu đẩy TIẾNG TRẢ LỜI
+// xuống /api/audio/stream ngay khi tổng hợp được mệnh đề đầu tiên, tức là ngay
+// giữa quãng chờ đó. Không ai đọc socket trong lúc ấy thì cửa sổ TCP đóng lại,
+// hàng đợi phía server đầy và nó BỎ KHUNG -- câu trả lời về tới loa thì đã mất
+// đầu và vỡ vụn.
+//
+// Móc này để sketch cắm speakerStreamPoll() vào. MicUplink không cần biết đó là
+// gì, nên đường tiếng vào và đường tiếng ra vẫn không phụ thuộc lẫn nhau.
+void micSetIdleHook(void (*hook)());
+
 // Gọi mỗi vòng loop(). Tự mở câu nói khi nghe thấy tiếng, tự chốt khi im lặng,
 // rồi gửi lên server. Trả về true đúng một lần, ngay sau khi có kết quả.
 //

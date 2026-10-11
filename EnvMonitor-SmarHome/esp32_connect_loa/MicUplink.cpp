@@ -1,34 +1,42 @@
 #include "MicUplink.h"
 
 #include <WiFi.h>
-#include <driver/i2s.h>
 
-#define MIC_I2S_PORT I2S_NUM_0
+#include "AudioBus.h"
+
+// Driver I2S KHÔNG còn do file này sở hữu. Mic và loa nối chung hai dây clock
+// (D14/D15) nên phải nằm chung một bộ ngoại vi chạy song công -- xem AudioBus.h.
+// Mọi thao tác cài/nhả driver ở đây đều đã chuyển thành lời gọi sang đó.
 
 // 256 mẫu @16 kHz = 16 ms = 512 byte PCM16.
 //
 // Board ESP32-S3 dùng khung 512 mẫu, ở đây cố tình nhỏ hơn một nửa: mỗi mẫu I2S
 // chiếm 4 byte lúc đọc thô, nên khung 512 kéo theo 3 KB bộ đệm tĩnh cộng 8 KB
-// đệm DMA. Trên board này, nơi A2DP đã ăn gần hết RAM, 16 ms độ trễ thêm rẻ hơn
-// nhiều so với vài KB nhớ.
+// đệm DMA. 16 ms độ trễ thêm rẻ hơn nhiều so với vài KB nhớ.
 static constexpr int FRAME_SAMPLES = 256;
 static int32_t i2s_raw[FRAME_SAMPLES];
 static int16_t pcm_frame[FRAME_SAMPLES];
 
-static int  sound_level = 0;
-static bool driver_ready = false;
+static int sound_level = 0;
+
+// Việc cần làm trong lúc chờ server -- thường là bơm tiếng trả lời ra loa.
+// Xem lý do đầy đủ ở MicUplink.h.
+static void (*idle_hook)() = nullptr;
+
+static inline void idleTick() {
+  if (idle_hook) idle_hook();
+}
+
+// Giữ nguyên tên cũ cho phần còn lại của file đọc được; giờ nó chỉ là bóng của
+// trạng thái bus dùng chung.
+#define driver_ready audioBusReady()
 
 // Đọc một khung từ DMA. `wait_ms` = 0 nghĩa là không chặn: hết dữ liệu thì trả 0
 // ngay để loop() còn đi phục vụ web server và bơm ring buffer của loa.
 static int captureFrame(TickType_t wait_ms) {
   if (!driver_ready) return 0;
 
-  size_t bytes_read = 0;
-  if (i2s_read(MIC_I2S_PORT, i2s_raw, sizeof(i2s_raw), &bytes_read, pdMS_TO_TICKS(wait_ms)) != ESP_OK) {
-    return 0;
-  }
-
-  int count = bytes_read / sizeof(int32_t);
+  int count = audioBusRead(i2s_raw, FRAME_SAMPLES, (uint32_t)wait_ms);
   if (count <= 0) return 0;
 
   int64_t sum = 0;
@@ -44,59 +52,14 @@ static int captureFrame(TickType_t wait_ms) {
   return count;
 }
 
-// Cài driver I2S. Chỉ giữ trong lúc thật sự đọc mic -- xem ghi chú ở MicUplink.h.
+// Cài bus I2S. Mic và loa dùng chung nó, nên hàm này chỉ còn là một lời gọi.
 static bool micInstall() {
-  if (driver_ready) return true;
-
-  i2s_config_t cfg = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = MIC_SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = i2s_comm_format_t(I2S_COMM_FORMAT_STAND_I2S),
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    // 4 x 256 mẫu = 64 ms tiếng nằm sẵn trong DMA, tốn 4 KB. Đủ để một lần
-    // client.write() bị nghẽn mạng không làm thủng đoạn ghi, mà vẫn còn chỗ cho
-    // socket -- hai thứ này tranh nhau cùng một vùng nhớ.
-    .dma_buf_count = 4,
-    .dma_buf_len = FRAME_SAMPLES,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
-  };
-
-  i2s_pin_config_t pins = {
-    .bck_io_num = MIC_PIN_SCK,
-    .ws_io_num = MIC_PIN_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = MIC_PIN_SD
-  };
-
-  esp_err_t err = i2s_driver_install(MIC_I2S_PORT, &cfg, 0, NULL);
-  if (err != ESP_OK) {
-    Serial.printf("[MIC] Khong cai duoc driver I2S (ma loi %d). Heap trong: %u byte.\n",
-                  (int)err, (unsigned)ESP.getFreeHeap());
-    return false;
-  }
-
-  err = i2s_set_pin(MIC_I2S_PORT, &pins);
-  if (err != ESP_OK) {
-    Serial.printf("[MIC] Khong gan duoc chan I2S (ma loi %d).\n", (int)err);
-    i2s_driver_uninstall(MIC_I2S_PORT);
-    return false;
-  }
-
-  driver_ready = true;
-  return true;
-}
-
-static void micUninstall() {
-  if (!driver_ready) return;
-  i2s_driver_uninstall(MIC_I2S_PORT);
-  driver_ready = false;
+  return audioBusBegin();
 }
 
 int micLevel() { return sound_level; }
+
+void micSetIdleHook(void (*hook)()) { idle_hook = hook; }
 
 // ------------------------------------------------------------------ self-test
 struct MicSelfTest {
@@ -173,10 +136,10 @@ bool micBegin() {
   MicSelfTest r = micSelfTest(1500);
   micPrintSelfTest(r);
 
-  // Nhả driver ngay. Phần nhớ này phải để dành cho A2DP và cho socket -- mic chỉ
-  // cần tới nó trong đúng ba giây của mỗi lần test.
-  micUninstall();
-  Serial.printf("[MIC] Da nha driver I2S, tra lai bo nho | Heap %u -> %u byte\n",
+  // KHÔNG nhả driver nữa. Hồi còn A2DP thì vài KB đệm DMA là khoản dự phòng để
+  // mở socket, nên mic chỉ mượn bus trong đúng ba giây mỗi lần đo. Giờ loa I2S
+  // dùng chung chính bus đó: nhả ra là tắt luôn đường tiếng trả lời.
+  Serial.printf("[MIC] Giu bus I2S cho ca mic va loa | Heap %u -> %u byte\n",
                 (unsigned)heap_before, (unsigned)ESP.getFreeHeap());
 
   return r.frames > 0 && !r.all_zero;
@@ -234,9 +197,8 @@ MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration
     return res;
   }
 
-  // Socket mở TRƯỚC rồi mới cấp đệm DMA. Hai thứ này tranh cùng một vùng nhớ, và
-  // nếu thiếu thì thà hỏng ở bước mở socket -- lỗi đó nói rõ nguyên nhân hơn hẳn
-  // một lần i2s_driver_install thất bại.
+  // Bus thường đã chạy sẵn từ setup(); lời gọi này chỉ là lưới an toàn cho
+  // trường hợp micBegin() chưa từng chạy.
   if (!micInstall()) {
     res.error = "mic_install_failed";
     Serial.printf("[MIC-UP] Khong cap duoc dem DMA cho mic. Heap con %u byte.\n",
@@ -295,10 +257,9 @@ MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration
   res.local_peak = peak;
   client.flush();
 
-  // Nhả đệm DMA ngay khi gửi xong. Sau đây là quãng chờ server chạy STT + trợ lý
-  // + TTS, có thể vài giây -- không có lý do gì giữ 4 KB trong lúc đó, nhất là
-  // khi luồng audio trả lời sắp cần mở lại socket.
-  micUninstall();
+  // Bus I2S được giữ nguyên qua quãng chờ server chạy STT + trợ lý + TTS. Trước
+  // đây chỗ này nhả đệm DMA để trả RAM cho A2DP, nhưng giờ câu trả lời đi ra loa
+  // I2S trên chính bus đó -- nhả ra là không nghe được câu vừa hỏi.
 
   Serial.printf("[MIC-UP] Da gui %u/%u byte | Bien do lon nhat tai cho: %d\n",
                 (unsigned)sent, (unsigned)content_length, peak);
@@ -317,6 +278,7 @@ MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration
       delay(10);
       continue;
     }
+    idleTick();
     String line = client.readStringUntil('\n');
     if (!in_body) {
       if (res.http_status == 0 && line.startsWith("HTTP/")) {
@@ -354,7 +316,7 @@ MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration
   }
   if (res.reply.length() > 0) {
     Serial.printf("[MIC-UP] ==> TRO LY TRA LOI: \"%s\"\n", res.reply.c_str());
-    Serial.println("[MIC-UP] ==> Cau tra loi nay dang duoc day ra loa Bluetooth qua /api/audio/stream.");
+    Serial.println("[MIC-UP] ==> Cau tra loi dang ve qua /api/audio/stream, phat ra loa I2S.");
   }
   if (res.error.length() > 0) {
     Serial.printf("[MIC-UP] ==> Server bao loi: %s\n", res.error.c_str());
@@ -448,7 +410,10 @@ static void closeUtterance(MicUploadResult& out) {
   while (millis() < deadline) {
     if (!up_client.available()) {
       if (!up_client.connected()) break;
-      delay(5);
+      // Server đang nói trong lúc mình đứng chờ nó trả lời. Không bơm tiếng ở
+      // đây thì câu trả lời mất đầu -- xem ghi chú ở MicUplink.h.
+      idleTick();
+      delay(2);
       continue;
     }
     String line = up_client.readStringUntil('\n');

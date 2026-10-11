@@ -21,6 +21,20 @@ from typing import Any
 from app.ai.base import LanguageModel, LlmMessage
 from app.core.utils import strip_accents
 from app.domain.home import Capability, CapabilityKind, Device, DeviceType, HomeConfig
+from app.domain.phrasing import describe_command, join_actions
+
+#: Những ngữ cảnh mà "ở phòng nào" là câu hỏi bắt buộc trước khi làm gì.
+#:
+#: "Đọc sách" không nói lên cái đèn nào phải sáng; "đi ngủ" hay "ra khỏi nhà" thì
+#: có -- cả căn hộ, không cần hỏi.
+_ROOM_SPECIFIC_SCENES = {"reading", "relax", "movie_time"}
+
+#: Việc người dùng định làm, để hỏi lại cho tự nhiên thay vì hỏi trống không.
+_SCENE_NEEDS = {
+    "reading": "đọc sách",
+    "relax": "nghỉ ngơi",
+    "movie_time": "xem phim",
+}
 
 _ROOM_RE = re.compile(r"Phòng hiện tại:\s*[^(\n]*\(([a-z0-9_]+)\)")
 _STATE_LINE_RE = re.compile(r"^- ([a-z0-9_]+) \([^)]*\): (.*)$", re.MULTILINE)
@@ -55,10 +69,17 @@ _ALL_WORDS = ("tat ca", "het", "toan bo", "moi phong", "ca nha")
 class MockLanguageModel(LanguageModel):
     name = "mock-llm"
 
-    def __init__(self, home: HomeConfig, chunk_size: int = 24, delay_s: float = 0.0) -> None:
+    def __init__(
+        self,
+        home: HomeConfig,
+        chunk_size: int = 24,
+        delay_s: float = 0.0,
+        confirm_all: bool = False,
+    ) -> None:
         self._home = home
         self._chunk_size = chunk_size
         self._delay = delay_s
+        self._confirm_all = confirm_all
 
     async def stream(
         self,
@@ -75,11 +96,51 @@ class MockLanguageModel(LanguageModel):
             history=list(reversed(user_turns[:-1])),
             messages=messages,
         )
+        if self._confirm_all:
+            reply = self._as_proposal(reply)
         payload = json.dumps(reply, ensure_ascii=False)
         for start in range(0, len(payload), self._chunk_size):
             if self._delay:
                 await asyncio.sleep(self._delay)
             yield payload[start : start + self._chunk_size]
+
+    def _as_proposal(self, reply: dict[str, Any]) -> dict[str, Any]:
+        """Đổi "mình đã bật đèn rồi nhé" thành "mình bật đèn nhé?".
+
+        Khi chính sách bắt xác nhận trước mọi thao tác, lệnh trong `commands`
+        chưa chạy -- nó đang nằm chờ một tiếng "vâng". Câu nói kiểu đã-làm-xong
+        lúc ấy là nói sai, và sai theo hướng tệ nhất: người dùng nghe xong tưởng
+        xong việc rồi bỏ đi, để lại cái đèn vẫn tắt.
+
+        Sửa ở ĐÂY chứ không sửa sau, vì trường `speech` được bóc ra và đẩy sang
+        TTS ngay trong lúc mô hình còn đang sinh -- tới lúc validator kết luận
+        là "đang chờ" thì câu kia đã phát ra loa mất rồi.
+        """
+        scene_id = reply.get("scene")
+        if scene_id:
+            # Ngữ cảnh cũng là một loạt lệnh, chỉ là được gọi bằng một cái tên.
+            # Validator sẽ bung nó ra rồi giữ lại chờ xác nhận như mọi lệnh khác,
+            # nên câu "đã bật chế độ đọc sách rồi nhé" ở đây cũng là nói sai.
+            scene = next((s for s in self._home.scenes if s.id == scene_id), None)
+            name = scene.name.lower() if scene else str(scene_id)
+            return {**reply, "speech": f"Mình bật {name} nhé?"}
+
+        commands = reply.get("commands") or []
+        if not commands:
+            return reply
+
+        parts: list[str] = []
+        for command in commands:
+            device = self._home.device_map.get(str(command.get("device_id", "")))
+            if device is None:
+                continue
+            parts.append(
+                describe_command(device, str(command.get("capability", "")), command.get("value"))
+            )
+        if not parts:
+            return reply
+
+        return {**reply, "speech": f"Mình {join_actions(parts)} nhé?"}
 
     # ----------------------------------------------------------- reasoning
     def _reason(
@@ -366,6 +427,29 @@ class MockLanguageModel(LanguageModel):
         # -------------------------------------------------------
         scene_id = self._match_scene(norm)
         if scene_id is not None:
+            # "Mình muốn đọc sách" là một NHU CẦU, chưa phải một lệnh: chưa biết
+            # đọc ở phòng nào thì chưa biết bật đèn nào. Hỏi cho đủ trước, rồi
+            # lượt sau mới đề xuất lệnh cụ thể.
+            #
+            # Chỉ hỏi khi người dùng chưa nêu phòng và câu nói không có động từ
+            # điều khiển -- "bật chế độ đọc sách" là lệnh rõ ràng, hỏi lại chỗ đó
+            # chỉ làm phiền.
+            if (
+                scene_id in _ROOM_SPECIFIC_SCENES
+                and self._match_room(norm) is None
+                and not self._has_action(norm)
+            ):
+                rooms = ", ".join(r.name.lower() for r in self._home.rooms[:3])
+                return {
+                    "speech": (
+                        f"Bạn định {_SCENE_NEEDS[scene_id]} ở đâu để mình chuẩn bị ánh sáng nè? "
+                        f"{rooms[0].upper() + rooms[1:]}? Mình để đèn sáng dịu hay sáng rõ ạ?"
+                    ),
+                    "commands": [],
+                    "scene": None,
+                    "needs_clarification": True,
+                }
+
             scene = self._home.scene_map[scene_id]
             speech_map = {
                 "reading": "Mình đã bật chế độ đọc sách với ánh sáng dịu cho bạn rồi nhé.",

@@ -18,7 +18,7 @@ constexpr int PIN_LED_BED_MAIN = 17;
 constexpr int PIN_LED_BED_SIDE = 18;
 constexpr int PIN_LED_STUDY    = 36;
 constexpr int PIN_LED_BALCONY  = 37;
-constexpr int PIN_LED_WC       = 39;
+constexpr int PIN_LED_WC       = 40;
 
 // Cảm biến Siêu âm & DHT
 constexpr int PIN_TRIG = 4;
@@ -53,13 +53,16 @@ const char SERVER_API_URL[] = "https://smart-apartment-server.fly.dev";
 // Thu ket noi thang toi mang nay truoc. Khong vao duoc trong WIFI_CONNECT_TIMEOUT_MS
 // thi quay ve Captive Portal cua WiFiManager nhu cu.
 // De WIFI_SSID rong ("") neu muon bo hoan toan buoc nay va chi dung portal.
-#define WIFI_SSID     "51_Nguyen_Thien_Ke"
-#define WIFI_PASSWORD "0986172846"
+#define WIFI_SSID     "FSB-Student 1"
+#define WIFI_PASSWORD "fsb@student"
 #define WIFI_CONNECT_TIMEOUT_MS 25000
 
 // ============ TRỢ LÝ GIỌNG NÓI THỜI GIAN THỰC (WebSocket /ws/voice) ============
-// Mic đẩy thẳng từng khung 32 ms lên server trong lúc người dùng còn đang nói.
-// Không bao giờ giữ cả câu nói trong RAM, nên độ dài câu không còn bị heap chặn.
+// Đặt 0 để TẮT tính năng nhận diện giọng nói (không stream mic lên server).
+// Mic INMP441 vẫn đo mức âm thanh cho LCD phòng ngủ nhưng không gửi audio đi đâu.
+// Đặt 1 nếu muốn bật lại.
+#define ENABLE_VOICE_ASSISTANT 0
+
 #define VOICE_WS_HOST   "smart-apartment-server.fly.dev"
 #define VOICE_WS_PATH   "/ws/voice"
 

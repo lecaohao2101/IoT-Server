@@ -163,13 +163,23 @@ def test_unknown_scene_is_a_404(client: TestClient):
 
 
 def test_chat_turn_controls_a_device(client: TestClient):
-    body = client.post(
-        "/api/v1/chat", json={"text": "bật đèn phòng khách", "room": "living_room"}
+    session = "sess-chat-controls"
+    asked = client.post(
+        "/api/v1/chat",
+        json={"text": "bật đèn phòng khách", "room": "living_room", "session_id": session},
     ).json()
-    assert body["speech"]
-    accepted = body["plan"]["accepted"]
+    # Chính sách bắt xác nhận trước mọi thao tác: lượt đầu chỉ hỏi lại.
+    assert asked["speech"]
+    assert asked["plan"]["pending_confirmation"], asked["plan"]
+    assert not asked["plan"]["accepted"]
+    assert asked["dispatched"] == 0
+
+    done = client.post(
+        "/api/v1/chat", json={"text": "vâng", "session_id": session}
+    ).json()
+    accepted = done["plan"]["accepted"]
     assert any(c["device_id"] == "living_room_light" and c["value"] == "on" for c in accepted)
-    assert body["dispatched"] >= 1
+    assert done["dispatched"] >= 1
 
 
 def test_chat_keeps_session_history(client: TestClient):

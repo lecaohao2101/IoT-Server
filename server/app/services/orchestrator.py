@@ -284,6 +284,10 @@ class Orchestrator:
             quiet_hours=quiet,
             policy_notes=self._policy_notes,
             assistant_name=self._assistant_name,
+            # Mô hình phải biết lệnh của nó chưa chạy ngay, nếu không nó báo "đã
+            # bật đèn rồi nhé" trong khi lệnh còn nằm chờ xác nhận -- người dùng
+            # nghe xong tưởng xong việc và bỏ đi.
+            confirm_all=self._policy.confirm_all,
         )
         messages = self._history(session_id, ctx, user_text)
 
@@ -509,7 +513,7 @@ class Orchestrator:
                 notes.append(f"Lưu ý: {note}.")
 
         if plan.pending_confirmation:
-            prompt = plan.notes[0] if plan.notes else "Bạn xác nhận thực hiện chứ?"
+            prompt = plan.confirm_prompt or "Bạn xác nhận thực hiện chứ?"
             await self._conversations.set_pending(
                 session_id,
                 PendingConfirmation(
@@ -639,9 +643,17 @@ class Orchestrator:
     async def execute_commands(
         self, commands: list[Command], *, session_id: str = "api"
     ) -> tuple[CommandPlan, DispatchReport | None]:
-        """Direct control path for the dashboard: same validator, no model."""
+        """Direct control path for the dashboard: same validator, no model.
+
+        ``confirm_all=False``: người dùng vừa chạm vào đúng cái công tắc đó trên
+        màn hình. Cái chạm ấy chính là sự xác nhận, nên hỏi lại chỉ là bắt họ bấm
+        hai lần. Thao tác `sensitive` thì vẫn phải xác nhận như cũ -- luật riêng
+        cho chúng không bị cờ này động tới.
+        """
         snapshot = await self._state.snapshot()
-        plan = self._validator.validate(commands, session_id=session_id, snapshot=snapshot)
+        plan = self._validator.validate(
+            commands, session_id=session_id, snapshot=snapshot, confirm_all=False
+        )
         report = await self._bridge.dispatch(plan) if plan.accepted else None
         if plan.rejected:
             await self._bus.publish(

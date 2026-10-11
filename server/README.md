@@ -246,6 +246,28 @@ thác sĩ" — và so khớp tuyệt đối chỉ bắt được khoảng một 
 đang nói *về* ai đó chứ không phải nói *với* ai, nên "mai mình nộp luận văn thạc sĩ
 rồi" không đánh thức căn hộ.
 
+So theo chữ vẫn chưa đủ. Một lần gọi thật trên điện thoại ra `"Anh taxi ơi, mở cửa"`:
+bộ nhận dạng gộp "Thạc Sĩ" thành một tiếng "taxi", và ở dạng chữ hai chuỗi chỉ giống
+**0.636** — dưới ngưỡng, nên căn hộ im lặng còn người dùng không hiểu vì sao. Vì thế
+có thêm một phép so **theo âm**: `phonetic_key()` quy cả hai về bộ âm (th→t, s/x→s,
+ch/tr→c, nh/ng→n, d/gi/r→z, bỏ dấu cách), biến `anh thac si` thành `an tac si` và
+`anh taxi` thành `an tasi` — giống nhau **0.923**. Cửa sổ so cũng thử cả độ rộng hẹp
+hơn một từ, vì bộ nhận dạng gộp và tách tiếng rất tuỳ hứng.
+
+Phép so theo âm là một không gian lỏng hơn hẳn, nên đi kèm ba cái chặn. Đo trên 44 câu
+đời thường, bỏ cái nào cũng có câu đánh thức nhầm:
+
+| Cái chặn | Thiếu nó thì |
+|---|---|
+| So theo âm phải vượt ngưỡng **+0.06** | "anh thấy sao" (0.833), "anh tài xế đang ở đâu rồi" (0.833), "anh ta xin nghỉ rồi" (0.857) đều đánh thức |
+| Cửa sổ phải **thẳng hàng ở tiếng đầu** | "anh ấy là thạc sĩ kinh tế" cho cửa sổ lệch pha `la thac si`, ăn 0.857 nhờ phần đuôi |
+| Alias rút gọn `thạc sĩ` **chỉ nhận ở đầu câu** | "em đang học cao học thạc sĩ" khớp tuyệt đối ở vị trí cuối câu |
+
+Còn đúng một va chạm **không gỡ được bằng chữ**: `"anh taxi tới chưa em"` nói với tài
+xế thật cũng đánh thức, vì hai tiếng đầu trùng âm hoàn toàn với lời gọi. Hậu quả nhẹ —
+trợ lý trả lời lạc đề, mà lệnh thì vẫn phải qua validator — và đổi lại là lời gọi thật
+chạy được. Muốn dứt hẳn thì đổi `ASSISTANT_NAME` sang một tên ít va chạm hơn.
+
 Ba trường hợp **không cần gọi tên**:
 
 - Câu tiếp theo trong `WAKE_FOLLOW_UP_S` giây sau lần gọi trước (mặc định 30 s).
@@ -265,6 +287,34 @@ Ba trường hợp **không cần gọi tên**:
 Server đang nghe tên nào thì `GET /api/v1/system/info` → `assistant` mới là sự thật,
 `.env` thì không — nó có thể bị secrets của Fly ghi đè.
 
+### Xác nhận trước mọi thao tác
+
+`confirm_all: true` trong `config/safety.yaml`. Trợ lý **đề xuất**, người dùng **đồng ý**,
+rồi lệnh mới xuống thiết bị:
+
+```
+bạn   ──► "Anh Thạc Sĩ, bật đèn phòng khách"
+trợ lý ──► "Mình bật Đèn phòng khách nhé?"        ← chưa có gì xuống thiết bị
+bạn   ──► "vâng"
+trợ lý ──► "Đã thực hiện."                         ← lúc này MQTT mới chạy
+```
+
+Nói "thôi" / "huỷ" thì thao tác bị bỏ. Trả lời xác nhận **không cần gọi lại tên trợ lý**.
+
+Đây là luật trong policy chứ không phải lời dặn trong prompt: mô hình có thể bị dẫn dụ
+bỏ qua một câu hỏi, luật này chạy sau nó. Vài điểm đáng biết:
+
+- Câu hỏi **gộp mọi lệnh đang treo thành một**. Hai lệnh cùng một thiết bị thì tên chỉ
+  nhắc một lần ("Mình bật Đèn phòng khách, độ sáng 90% nhé?"); nhiều thiết bị cùng một
+  việc thì rút động từ ra ngoài ("Mình bật Đèn phòng khách và Đèn bếp nhé?"); quá 4 cái
+  tên thì cắt bớt ("… và 3 thiết bị nữa").
+- **Nút bấm trên app vẫn làm ngay**: cái chạm đó đã là xác nhận. Riêng thao tác
+  `sensitive` (mở khoá cửa) thì vẫn hỏi, kể cả từ nút bấm.
+- Thứ tự kiểm tra không đổi: lệnh bị `forbid` vẫn bị **từ chối thẳng**, không biến thành
+  câu hỏi — nếu không thì một tiếng "ừ" là cửa mở lúc nửa đêm.
+
+Đặt `confirm_all: false` để quay về nếp cũ (làm ngay, chỉ hỏi với thao tác nhạy cảm).
+
 ### Sinh trắc học giọng nói
 
 `app/services/speaker.py` dựng vân giọng 32 chiều bằng Python thuần (MFCC + độ lệch
@@ -279,6 +329,7 @@ phải đọc.
 | `VOICE_VERIFICATION_THRESHOLD` | `0.75` | Ngưỡng tương đồng cosine |
 | `VOICE_ENROLLMENT_SAMPLES` | `3` | Số câu phải đọc để hồ sơ coi như xong |
 | `VOICE_ENROLLMENT_REQUIRED` | `false` | Bật để **từ chối mọi lệnh giọng nói** khi chưa ai đăng ký. Tắt mặc định để server chưa cấu hình vẫn demo được; app mobile tự chặn người dùng mới ở màn hình đăng ký bất kể cờ này |
+| `VOICE_VERIFICATION_ON_DEVICE` | `false` | Có kiểm tra vân giọng trên board ESP32 không. Tắt mặc định: board không có màn hình nên không ai đăng ký giọng từ đó được, mẫu duy nhất để so là mẫu thu bằng mic điện thoại — khác mic, khác phòng, khác khoảng cách. Từ khoá đánh thức vẫn gác board; mobile vẫn xác thực như thường |
 
 Vân giọng **đo trên âm thanh thô**, còn nhận dạng thì đo trên âm thanh đã lọc nhiễu:
 app đăng ký bằng PCM thô qua REST, nên đo vân giọng sau bộ lọc là so hồ sơ dựng theo

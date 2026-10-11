@@ -24,7 +24,22 @@ from app.safety.validator import CommandValidator
 
 @pytest.fixture
 def validator(home, policy) -> CommandValidator:
-    return CommandValidator(home, policy)
+    """Validator với `confirm_all` TẮT.
+
+    Phần lớn test trong file này kiểm tra những luật khác: kẹp giá trị, chuẩn hoá
+    enum, giờ yên tĩnh, khử trùng lặp. Để `confirm_all` bật thì mọi lệnh đều rơi
+    vào `pending_confirmation` và không test nào còn nhìn thấy `accepted` -- che
+    mất đúng thứ chúng đang kiểm tra.
+
+    Bản thân `confirm_all` có mục riêng ở cuối file, dùng `confirming_validator`.
+    """
+    return CommandValidator(home, policy.model_copy(update={"confirm_all": False}))
+
+
+@pytest.fixture
+def confirming_validator(home, policy) -> CommandValidator:
+    """Validator đúng như cấu hình đang chạy thật (`config/safety.yaml`)."""
+    return CommandValidator(home, policy.model_copy(update={"confirm_all": True}))
 
 
 DAYTIME = datetime(2026, 3, 2, 14, 0, tzinfo=UTC)
@@ -113,11 +128,15 @@ def test_policy_limit_is_tighter_than_the_device_range(validator):
 
 
 def test_quiet_hours_limit_only_applies_at_night(home, policy):
-    validator = CommandValidator(home, policy)
+    # Dựng validator riêng vì cần đồng hồ khác nhau giữa hai nửa; `confirm_all`
+    # tắt đi vì test này nói về giới hạn độ sáng, không về việc hỏi lại.
+    relaxed = policy.model_copy(update={"confirm_all": False})
+
+    validator = CommandValidator(home, relaxed)
     day = one(validator, "bedroom_light", "brightness", "100", now=DAYTIME)
     assert day.accepted[0].value == 100
 
-    validator = CommandValidator(home, policy)
+    validator = CommandValidator(home, relaxed)
     night = one(validator, "bedroom_light", "brightness", "100", now=NIGHT)
     assert night.accepted[0].value == 40
 
@@ -126,12 +145,14 @@ def test_quiet_hours_limit_only_applies_at_night(home, policy):
 
 
 def test_forbidden_at_night_allowed_by_day(home, policy):
-    validator = CommandValidator(home, policy)
+    relaxed = policy.model_copy(update={"confirm_all": False})
+
+    validator = CommandValidator(home, relaxed)
     night = one(validator, "bathroom_water_heater", "power", "on", now=NIGHT)
     assert night.rejected[0].code is RejectionCode.QUIET_HOURS
     assert not night.accepted
 
-    validator = CommandValidator(home, policy)
+    validator = CommandValidator(home, relaxed)
     day = one(validator, "bathroom_water_heater", "power", "on", now=DAYTIME)
     assert day.accepted
 
@@ -350,3 +371,136 @@ def test_step_snaps_values_to_the_grid(home):
     curtain = home.device("living_room_curtain")
     value, _ = curtain.capability("position").coerce("43")
     assert value == 45  # step is 5
+
+
+# ------------------------------------------------- xác nhận trước MỌI thao tác
+def test_confirm_all_parks_an_ordinary_command(confirming_validator):
+    """Bật một cái đèn cũng phải hỏi, không chỉ riêng thao tác nhạy cảm."""
+    plan = one(confirming_validator, "living_room_light", "power", "on", now=DAYTIME)
+
+    assert not plan.accepted, "lệnh đã xuống thiết bị mà chưa ai đồng ý"
+    assert len(plan.pending_confirmation) == 1
+    assert plan.pending_confirmation[0].device_id == "living_room_light"
+    assert not plan.rejected
+
+
+def test_the_question_names_the_device_in_plain_vietnamese(confirming_validator):
+    """Câu hỏi phải đọc lên được, không phải đọc tên thuộc tính trong code."""
+    plan = one(confirming_validator, "living_room_light", "power", "on", now=DAYTIME)
+
+    assert plan.confirm_prompt == "Mình bật Đèn phòng khách nhé?"
+    assert "power" not in plan.confirm_prompt
+    assert "True" not in plan.confirm_prompt
+
+
+def test_several_commands_become_one_question(confirming_validator):
+    """Bốn lệnh thành bốn câu hỏi rời là cách chắc chắn khiến người dùng bỏ dở."""
+    plan = confirming_validator.validate(
+        [
+            Command(device_id="living_room_light", capability="power", value="on"),
+            Command(device_id="living_room_light", capability="brightness", value=90),
+        ],
+        now=DAYTIME,
+    )
+
+    assert len(plan.pending_confirmation) == 2
+    assert plan.confirm_prompt.count("nhé?") == 1, "hỏi thành nhiều câu rời rạc"
+    # Hai lệnh cho CÙNG một thiết bị thì tên chỉ được nhắc một lần.
+    assert plan.confirm_prompt == "Mình bật Đèn phòng khách, độ sáng 90% nhé?"
+    assert plan.confirm_prompt.count("Đèn phòng khách") == 1
+
+
+def test_two_devices_are_joined_with_va(confirming_validator):
+    plan = confirming_validator.validate(
+        [
+            Command(device_id="living_room_light", capability="power", value="on"),
+            Command(device_id="kitchen_light", capability="power", value="on"),
+        ],
+        now=DAYTIME,
+    )
+
+    # Động từ chung được rút ra ngoài: "bật A và B", không phải "bật A và bật B".
+    assert plan.confirm_prompt == "Mình bật Đèn phòng khách và Đèn bếp nhé?"
+
+
+def test_a_long_list_is_cut_short(confirming_validator):
+    """"tắt hết đèn" ra bảy việc; đọc đủ bảy cái tên thì không ai nghe hết."""
+    lights = [
+        "living_room_light", "kitchen_light", "bedroom_light", "bedroom_side_light",
+        "study_light", "bathroom_light", "balcony_light",
+    ]
+    plan = confirming_validator.validate(
+        [Command(device_id=d, capability="power", value="off") for d in lights],
+        now=DAYTIME,
+    )
+
+    assert len(plan.pending_confirmation) == len(lights)
+    assert "3 thiết bị nữa" in plan.confirm_prompt
+    assert plan.confirm_prompt.count(",") <= 4
+
+
+def test_a_written_rule_still_phrases_its_own_question(confirming_validator):
+    """Luật viết tay cho thao tác nhạy cảm hỏi hay hơn mọi câu sinh tự động."""
+    plan = one(confirming_validator, "front_door_lock", "locked", False, now=DAYTIME)
+
+    assert plan.confirm_prompt == "Bạn chắc chắn muốn mở khóa cửa chính chứ?"
+
+
+def test_confirm_all_never_turns_a_refusal_into_a_question(confirming_validator):
+    """Thứ tự kiểm tra không được đổi: cấm vẫn là cấm, không phải 'hỏi lại'.
+
+    Mở khoá cửa ban đêm bị `forbid` chặn thẳng. Nếu confirm_all chen lên trước,
+    lệnh đó sẽ thành câu hỏi -- và một tiếng "ừ" là cửa mở lúc nửa đêm.
+    """
+    plan = one(confirming_validator, "front_door_lock", "locked", False, now=NIGHT)
+
+    assert not plan.pending_confirmation
+    assert plan.rejected and plan.rejected[0].code is RejectionCode.QUIET_HOURS
+
+
+def test_confirm_all_does_not_swallow_a_bad_value(confirming_validator):
+    """Lệnh sai vẫn bị từ chối ngay, không biến thành câu hỏi vô nghĩa."""
+    plan = one(confirming_validator, "living_room_light", "power", "xanh lá", now=DAYTIME)
+
+    assert not plan.pending_confirmation
+    assert plan.rejected[0].code is RejectionCode.INVALID_VALUE
+
+
+def test_confirming_dispatches_what_was_parked(confirming_validator):
+    """`skip_confirmation` là đường mà lời đồng ý đi qua, và nó phải thông."""
+    plan = one(
+        confirming_validator,
+        "living_room_light",
+        "power",
+        "on",
+        now=DAYTIME,
+        skip_confirmation=True,
+    )
+
+    assert len(plan.accepted) == 1
+    assert not plan.pending_confirmation
+
+
+def test_a_button_press_is_already_a_confirmation(confirming_validator):
+    """Nút trên app truyền confirm_all=False: cái chạm đó chính là sự xác nhận."""
+    plan = confirming_validator.validate(
+        [Command(device_id="living_room_light", capability="power", value="on")],
+        now=DAYTIME,
+        confirm_all=False,
+    )
+
+    assert len(plan.accepted) == 1
+    assert not plan.pending_confirmation
+
+
+def test_a_sensitive_action_still_asks_even_from_a_button(confirming_validator):
+    """confirm_all=False chỉ tắt luật chung, không đụng tới thao tác nhạy cảm."""
+    plan = confirming_validator.validate(
+        [Command(device_id="front_door_lock", capability="locked", value=False)],
+        now=DAYTIME,
+        confirm_all=False,
+    )
+
+    assert not plan.accepted
+    assert len(plan.pending_confirmation) == 1
+

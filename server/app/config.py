@@ -128,6 +128,15 @@ class Settings(BaseSettings):
     #: so the offline demo runs with no setup; on, it is what makes enrollment
     #: in the app genuinely mandatory rather than merely the first screen.
     voice_enrollment_required: bool = False
+    #: Whether the fingerprint is also checked on the ESP32 microphone board.
+    #:
+    #: Off: the board has no screen and no way to enroll anybody, so the only
+    #: voice it could ever match is one registered from the phone -- through a
+    #: different microphone, in a different room, at a different distance. That
+    #: comparison fails often enough to lock the owner out of their own
+    #: apartment. The wake word still gates the board; this only turns off the
+    #: *biometric* half. Mobile is unaffected and keeps verifying.
+    voice_verification_on_device: bool = False
 
     # -------------------------------------------------------------- wake word
     #: Who the apartment is. Spoken back to the user, written into the model's

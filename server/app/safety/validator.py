@@ -31,6 +31,11 @@ from app.domain.commands import (
     ValidatedCommand,
 )
 from app.domain.home import CapabilityKind, Device, HomeConfig
+from app.domain.phrasing import (
+    describe_command,
+    describe_device_actions,
+    join_actions,
+)
 from app.domain.state import HomeSnapshot
 from app.safety.rules import SafetyPolicy
 
@@ -90,14 +95,23 @@ class CommandValidator:
         snapshot: HomeSnapshot | None = None,
         now: datetime | None = None,
         skip_confirmation: bool = False,
+        confirm_all: bool | None = None,
     ) -> CommandPlan:
+        """``confirm_all`` ghi đè luật cùng tên trong policy cho riêng lần gọi này.
+
+        Nút bấm trên app truyền ``False``: cái chạm đó CHÍNH LÀ sự xác nhận, hỏi
+        lại một lần nữa chỉ là bắt người dùng bấm hai lần. Đường giọng nói thì
+        không truyền gì, tức là theo policy.
+        """
         now = now or self.local_now()
         quiet = self._policy.quiet_hours.contains(now)
+        confirm_all = self._policy.confirm_all if confirm_all is None else confirm_all
 
         accepted: list[ValidatedCommand] = []
         rejected: list[RejectedCommand] = []
         pending: list[ValidatedCommand] = []
         notes: list[str] = []
+        explicit_prompts: list[str] = []
 
         if not commands:
             return CommandPlan()
@@ -143,14 +157,19 @@ class CommandValidator:
             )
 
         for command in deduped:
-            outcome = self._validate_one(command, quiet=quiet, snapshot=snapshot)
+            outcome = self._validate_one(
+                command, quiet=quiet, snapshot=snapshot, confirm_all=confirm_all
+            )
             if isinstance(outcome, RejectedCommand):
                 rejected.append(outcome)
                 continue
             validated, needs_confirm, confirm_prompt = outcome
             if needs_confirm and not skip_confirmation:
                 pending.append(validated)
-                notes.append(confirm_prompt or "cần xác nhận")
+                if confirm_prompt:
+                    # Luật viết riêng cho thao tác này hỏi hay hơn mọi câu sinh
+                    # tự động, nên nó được ưu tiên.
+                    explicit_prompts.append(confirm_prompt)
                 continue
             if not self._device_limiter.allow(validated.device_id):
                 rejected.append(
@@ -169,6 +188,7 @@ class CommandValidator:
             rejected=tuple(rejected),
             pending_confirmation=tuple(pending),
             notes=tuple(dict.fromkeys(notes)),  # de-duplicated, order preserved
+            confirm_prompt=self._confirm_question(pending, explicit_prompts),
         )
         log.info(
             "command plan validated",
@@ -212,6 +232,7 @@ class CommandValidator:
         *,
         quiet: bool,
         snapshot: HomeSnapshot | None,
+        confirm_all: bool = False,
     ) -> RejectedCommand | tuple[ValidatedCommand, bool, str | None]:
         device = self._resolve_device(command.device_id)
         if device is None:
@@ -288,7 +309,9 @@ class CommandValidator:
             original_value=command.value,
         )
 
-        needs_confirm, prompt = self._needs_confirmation(device, command.capability, value)
+        needs_confirm, prompt = self._needs_confirmation(
+            device, command.capability, value, confirm_all
+        )
         return validated, needs_confirm, prompt
 
     def _apply_limits(
@@ -314,8 +337,41 @@ class CommandValidator:
                 return rule.message, rule.quiet_hours_only
         return None
 
+    def _confirm_question(
+        self, pending: list[ValidatedCommand], explicit: list[str]
+    ) -> str:
+        """Gộp mọi lệnh đang treo thành MỘT câu hỏi.
+
+        Bốn lệnh thành bốn câu hỏi rời là cách chắc chắn khiến người dùng bỏ
+        cuộc giữa chừng, và bỏ cuộc giữa chừng thì căn hộ ở trạng thái nửa vời.
+        """
+        if not pending:
+            return ""
+        if explicit:
+            # Luật viết tay cho thao tác nhạy cảm: giữ nguyên văn, và nếu có
+            # nhiều thì nối lại chứ không vứt bớt câu nào.
+            return " ".join(dict.fromkeys(explicit))
+
+        # Gộp theo thiết bị trước khi đọc. Hai lệnh cho cùng một cái đèn mà đọc
+        # rời ra thì tên thiết bị bị nhắc hai lần: "bật Đèn phòng khách và chỉnh
+        # độ sáng Đèn phòng khách lên 90%".
+        grouped: dict[str, list[ValidatedCommand]] = {}
+        for command in pending:
+            grouped.setdefault(command.device_id, []).append(command)
+
+        parts: list[str] = []
+        for device_id, commands in grouped.items():
+            device = self._home.device_map.get(device_id)
+            if device is None:
+                continue
+            parts.append(describe_device_actions(device, commands))
+        if not parts:
+            return "Bạn xác nhận thực hiện chứ?"
+
+        return f"Mình {join_actions(parts)} nhé?"
+
     def _needs_confirmation(
-        self, device: Device, capability: str, value: Any
+        self, device: Device, capability: str, value: Any, confirm_all: bool = False
     ) -> tuple[bool, str | None]:
         # A rule written for this exact action phrases the question better than
         # anything generated, so policy prompts win over the generic fallback.
@@ -323,15 +379,17 @@ class CommandValidator:
             if rule.value is None or _same_value(rule.value, value):
                 return True, rule.prompt
         if device.capabilities[capability].sensitive:
-            return True, f"Xác nhận đổi '{capability}' của {device.name} thành {_speak(value)}?"
+            # Hỏi bằng tiếng người, không đọc tên thuộc tính trong code ra.
+            # Bản cũ hỏi "Xác nhận đổi 'locked' của Khóa cửa chính thành bật?" --
+            # người nghe phải tự dịch, mà đây lại đúng là lúc cần hiểu ngay.
+            action = describe_command(device, capability, value)
+            return True, f"Bạn chắc chắn muốn {action} chứ?"
+        if confirm_all:
+            # Không kèm câu hỏi ở đây: một plan có bốn lệnh sẽ thành bốn câu hỏi
+            # rời rạc. Orchestrator gộp toàn bộ lệnh đang treo thành MỘT câu --
+            # xem describe_pending().
+            return True, None
         return False, None
-
-
-def _speak(value: Any) -> str:
-    """Render a value for a spoken prompt -- never leak Python's `True`/`False`."""
-    if isinstance(value, bool):
-        return "bật" if value else "tắt"
-    return str(value)
 
 
 def _same_value(a: Any, b: Any) -> bool:

@@ -7,12 +7,22 @@ extern LiquidCrystal_I2C lcd_lr;
 extern LiquidCrystal_I2C lcd_bed;
 
 void initLCDs();
+
+// Cập nhật trạng thái thiết bị thời gian thực (Dòng 0)
+void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acAngle, bool wifiOk);
+void updateLCDBedroomDevices(bool lightOn, bool acOn, int acAngle, bool extraLight = false);
+
+// Cập nhật cảm biến (Dòng 1)
+void updateLCDLivingRoomSensors(float temp, float hum, bool isDhtValid);
+void updateLCDBedroomSensors(float dist, int soundLevel);
+
+// Hiển thị thông báo tức thời khi bấm nút hoặc có lệnh (tự xóa sau timeout)
+void showLCDNotify(int screen, const char* msg, unsigned long durationMs = 2000);
+void checkLCDNotifyTimeout();
+
+// Các hàm tương thích ngược
 void updateLCDLivingRoom(float temp, float hum, bool isDhtValid);
 void updateLCDBedroom(float dist, int soundLevel);
-
-// Dòng 0 của LCD phòng khách. Hai hàm update ở trên chỉ ghi dòng 1, nên nếu
-// không có hàm này thì dòng 0 vĩnh viễn giữ lại thông báo cuối cùng của bước
-// khởi động Wi-Fi -- kể cả khi mạng đã nối lại từ lâu.
 void updateLCDWiFiStatus(bool connected);
 
 #endif

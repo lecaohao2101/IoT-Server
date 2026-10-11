@@ -132,9 +132,17 @@ def build_synthesizer(settings: Settings) -> SpeechSynthesizer:
         return _fail_or_fallback(settings, "TTS", exc, MockSynthesizer())
 
 
-def build_language_model(settings: Settings, home: HomeConfig) -> LanguageModel:
+def build_language_model(
+    settings: Settings, home: HomeConfig, confirm_all: bool = False
+) -> LanguageModel:
+    """``confirm_all`` chỉ để bộ suy luận offline nói đúng thì.
+
+    Provider thật nhận quy tắc đó qua prompt; bộ mock thì không đọc prompt, nên
+    phải truyền thẳng -- nếu không nó vẫn báo "đã bật đèn rồi nhé" trong khi lệnh
+    còn đang chờ xác nhận.
+    """
     if settings.llm_provider != "google":
-        return MockLanguageModel(home)
+        return MockLanguageModel(home, confirm_all=confirm_all)
     try:
         from app.ai.llm.gemini import GeminiLanguageModel
 
@@ -146,4 +154,6 @@ def build_language_model(settings: Settings, home: HomeConfig) -> LanguageModel:
             timeout_s=settings.llm_timeout_s,
         )
     except Exception as exc:  # noqa: BLE001
-        return _fail_or_fallback(settings, "LLM", exc, MockLanguageModel(home))
+        return _fail_or_fallback(
+            settings, "LLM", exc, MockLanguageModel(home, confirm_all=confirm_all)
+        )

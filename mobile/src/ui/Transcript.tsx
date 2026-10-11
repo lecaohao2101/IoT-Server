@@ -53,6 +53,7 @@ export function Transcript({ messages, partial }: Props) {
 function Bubble({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   const commands = message.commands ?? [];
+  const pending = message.pending ?? [];
   const rejections = message.rejections ?? [];
 
   return (
@@ -66,6 +67,19 @@ function Bubble({ message }: { message: Message }) {
               ✓ {describeCommand(command)}
             </Text>
           ))}
+        </View>
+      )}
+
+      {pending.length > 0 && (
+        <View style={styles.meta}>
+          {/* Dấu khác hẳn dấu ✓: việc này CHƯA xảy ra, nó đang đợi bạn trả lời.
+              Dùng chung một ký hiệu là cách để người dùng tưởng đèn đã bật. */}
+          {pending.map((command, index) => (
+            <Text key={`p-${command.device_id}-${index}`} style={styles.pending}>
+              ⏳ {describeCommand(command)}
+            </Text>
+          ))}
+          <Text style={styles.pendingHint}>Chờ bạn đồng ý — nói “vâng” hoặc “thôi”</Text>
         </View>
       )}
 
@@ -116,6 +130,8 @@ const styles = StyleSheet.create({
 
   meta: { marginTop: spacing.sm, gap: 2 },
   command: { color: colors.ok, fontSize: 12, fontFamily: 'monospace' },
+  pending: { color: colors.warn, fontSize: 12, fontFamily: 'monospace' },
+  pendingHint: { color: colors.warn, fontSize: 11, fontStyle: 'italic', marginTop: 2 },
   rejected: { color: colors.danger, fontSize: 12 },
   latency: { color: colors.textMuted, fontSize: 11, marginTop: spacing.sm },
 });

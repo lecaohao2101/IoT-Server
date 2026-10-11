@@ -53,6 +53,8 @@ export type Message = {
   text: string;
   streaming?: boolean;
   commands?: PlanCommand[];
+  /** Lệnh đã đề xuất nhưng CHƯA chạy, đang đợi người dùng đồng ý. */
+  pending?: PlanCommand[];
   rejections?: PlanRejection[];
   latency?: Record<string, number>;
 };
@@ -191,8 +193,13 @@ export function useVoiceSession(settings: Settings | null) {
           setAssistantName(frame.assistant_name);
           setWakeWordRequired(true);
           setConversationOpen(false);
+          // Nói rõ server NGHE THÀNH GÌ. Không có mẩu đó thì người dùng chỉ thấy
+          // im lặng và kết luận "app hỏng"; có nó thì họ thấy ngay mình gọi hụt
+          // tên hay bộ nhận dạng nghe nhầm, và đó là hai việc phải sửa khác nhau.
           setHint(
-            `Mình chỉ trả lời khi được gọi tên. Hãy thử: “${frame.assistant_name} ơi, bật đèn phòng khách”.`
+            frame.heard
+              ? `Mình nghe thành “${frame.heard}” — chưa thấy tên mình trong đó. Hãy thử: “${frame.assistant_name} ơi, bật đèn phòng khách”.`
+              : `Mình chỉ trả lời khi được gọi tên. Hãy thử: “${frame.assistant_name} ơi, bật đèn phòng khách”.`
           );
           break;
 
@@ -241,6 +248,7 @@ export function useVoiceSession(settings: Settings | null) {
               text: frame.text,
               streaming: false,
               commands: frame.plan?.accepted ?? [],
+              pending: frame.plan?.pending_confirmation ?? [],
               rejections: frame.plan?.rejected ?? [],
               latency: frame.latency_ms,
             };
