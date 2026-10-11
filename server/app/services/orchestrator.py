@@ -68,6 +68,25 @@ FALLBACK_SPEECH = "Xin lỗi, mình đang gặp sự cố khi xử lý yêu cầ
 EMPTY_SPEECH = "Mình chưa rõ yêu cầu, bạn nói lại giúp mình nhé."
 
 
+def _normalise(text: str) -> str:
+    """Fold case and punctuation away before testing one line against another.
+
+    The model writes its reply in ordinary lowercase prose ("mình bật đèn phòng
+    ngủ nhé?"), while anything we generate takes the display name straight from
+    ``home.yaml`` ("Mình bật Đèn phòng ngủ nhé?"). A single capital letter was
+    enough to defeat the plain substring test, and the user heard the same
+    question twice in a row.
+    """
+    folded = text.casefold()
+    kept = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in folded)
+    return " ".join(kept.split())
+
+
+def _asks_a_question(speech: str) -> bool:
+    """Whether the assistant already put the question to the user itself."""
+    return "?" in speech
+
+
 class TurnSink:
     """Where a turn's output goes. The WebSocket session and the REST handler each
     implement the parts they care about; the defaults make the rest no-ops."""
@@ -526,7 +545,13 @@ class Orchestrator:
                     commands=[c.model_dump() for c in plan.pending_confirmation],
                 ),
             )
-            notes.append(prompt)
+            # The generated question is a fallback, not a second opinion. Under
+            # ``confirm_all`` the prompt already tells the model to ask, and it
+            # does -- appending our template then says the same thing twice in a
+            # row, in slightly different words, which is how it reached a user:
+            # "Mình bật đèn phòng ngủ nhé? Mình bật Đèn phòng ngủ nhé?"
+            if not _asks_a_question(speech):
+                notes.append(prompt)
 
         if plan.rejected:
             await self._bus.publish(
@@ -537,7 +562,10 @@ class Orchestrator:
             # Speak the first rejection only: a list of error codes is not a reply.
             notes.append(plan.rejected[0].message)
 
-        addendum = " ".join(dict.fromkeys(n for n in notes if n and n not in speech))
+        spoken = _normalise(speech)
+        addendum = " ".join(
+            dict.fromkeys(n for n in notes if n and _normalise(n) not in spoken)
+        )
         return report, addendum.strip()
 
     # --------------------------------------------------------- confirmation
