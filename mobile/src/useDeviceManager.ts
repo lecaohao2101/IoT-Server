@@ -1,8 +1,5 @@
-/**
- * Hook managing real-time smart apartment device states and MQTT interactions.
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DEFAULT_DEVICES,
   isDeviceOn,
@@ -11,6 +8,8 @@ import {
 } from './devices';
 import { mqttManager, type MqttConnectionStatus } from './mqtt';
 import { authHeaders, httpUrl, type Settings } from './settings';
+
+const DEVICE_HISTORY_KEY = 'smart_apartment_device_history_v1';
 
 export function useDeviceManager(settings: Settings | null) {
   const [devices, setDevices] = useState<DeviceItem[]>(DEFAULT_DEVICES);
@@ -23,6 +22,32 @@ export function useDeviceManager(settings: Settings | null) {
 
   // Hàng đợi lưu các lệnh được bấm trong lúc ESP32 đang reboot/offline
   const pendingCommandsRef = useRef<Record<string, { room: string; values: Record<string, any> }>>({});
+
+  // Lưu lịch sử trạng thái thiết bị vào AsyncStorage
+  const saveHistory = useCallback((updated: DeviceItem[]) => {
+    const map: Record<string, DeviceState> = {};
+    for (const d of updated) {
+      map[d.id] = d.state;
+    }
+    AsyncStorage.setItem(DEVICE_HISTORY_KEY, JSON.stringify(map)).catch(() => {});
+  }, []);
+
+  // 1. Tải trạng thái/lịch sử đã lưu trên App khi khởi động
+  useEffect(() => {
+    AsyncStorage.getItem(DEVICE_HISTORY_KEY)
+      .then((raw) => {
+        if (!raw) return;
+        try {
+          const saved: Record<string, DeviceState> = JSON.parse(raw);
+          if (saved && typeof saved === 'object') {
+            setDevices((prev) =>
+              prev.map((dev) => (saved[dev.id] ? { ...dev, state: { ...dev.state, ...saved[dev.id] } } : dev))
+            );
+          }
+        } catch {}
+      })
+      .catch(() => {});
+  }, []);
 
   // ------------------------------------------------------------- MQTT Sync
   useEffect(() => {
@@ -53,21 +78,35 @@ export function useDeviceManager(settings: Settings | null) {
     if (parts.length === 3 && parts[2] === 'availability') {
       const isOnline = rawPayload.toLowerCase() === 'online' || rawPayload === 'true' || rawPayload === '1';
       console.log(`[MQTT] Board availability (${parts[1]}): ${isOnline ? 'online' : 'offline'}`);
-      setDevices((prev) =>
-        prev.map((dev) => ({
+      setDevices((prev) => {
+        const next = prev.map((dev) => ({
           ...dev,
           state: { ...dev.state, online: isOnline },
-        }))
-      );
+        }));
 
-      // Nếu ESP32 vừa online và có lệnh người dùng đã bấm lúc đang reboot: Tự động gửi ngay!
-      if (isOnline && Object.keys(pendingCommandsRef.current).length > 0) {
-        console.log('[MQTT] ESP32 vừa online! Tự động gửi lại các lệnh đã xếp hàng...');
-        for (const [id, cmd] of Object.entries(pendingCommandsRef.current)) {
-          mqttManager.publishCommand(cmd.room, id, cmd.values);
+        // ĐỒNG BỘ THEO APP: Khi ESP32 vừa online, khôi phục toàn bộ trạng thái đang mở trên App xuống mạch!
+        if (isOnline) {
+          console.log('[MQTT-SYNC] ESP32 vừa online! Bắt đầu đồng bộ trạng thái từ App xuống phần cứng...');
+          // 1. Gửi lại các lệnh đang xếp hàng (nếu người dùng bấm lúc đang reboot)
+          if (Object.keys(pendingCommandsRef.current).length > 0) {
+            for (const [id, cmd] of Object.entries(pendingCommandsRef.current)) {
+              mqttManager.publishCommand(cmd.room, id, cmd.values);
+            }
+            pendingCommandsRef.current = {};
+          }
+
+          // 2. Khôi phục tất cả thiết bị đang BẬT trên App xuống ESP32
+          for (const dev of next) {
+            if (isDeviceOn(dev)) {
+              console.log(`[MQTT-SYNC] Khôi phục thiết bị ${dev.name} (${dev.id}) sang BẬT trên ESP32`);
+              mqttManager.publishCommand(dev.room, dev.id, dev.state);
+            }
+          }
         }
-        pendingCommandsRef.current = {};
-      }
+
+        saveHistory(next);
+        return next;
+      });
       return;
     }
 
@@ -203,9 +242,11 @@ export function useDeviceManager(settings: Settings | null) {
     }
 
     // Optimistic update
-    setDevices((prev) =>
-      prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d))
-    );
+    setDevices((prev) => {
+      const next = prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d));
+      saveHistory(next);
+      return next;
+    });
 
     const actionText = `${nextValues.power === 'on' || nextValues.state === 'open' || nextValues.locked === false ? 'Bật' : 'Tắt'} ${device.name}`;
     const isOnline = device.state?.online !== false;
@@ -237,15 +278,17 @@ export function useDeviceManager(settings: Settings | null) {
         }).catch(() => {});
       }
     }
-  }, []);
+  }, [saveHistory]);
 
   const setCapability = useCallback((device: DeviceItem, capability: string, value: any) => {
     const nextValues = { [capability]: value };
 
     // Optimistic update
-    setDevices((prev) =>
-      prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d))
-    );
+    setDevices((prev) => {
+      const next = prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d));
+      saveHistory(next);
+      return next;
+    });
 
     const isOnline = device.state?.online !== false;
     if (!isOnline) {
@@ -259,20 +302,22 @@ export function useDeviceManager(settings: Settings | null) {
     // Send direct MQTT command
     mqttManager.publishCommand(device.room, device.id, nextValues);
     setLastActionMessage(`[MQTT] Đã cập nhật ${device.name}: ${capability} = ${value}`);
-  }, []);
+  }, [saveHistory]);
 
   const turnOffAllLights = useCallback(() => {
     const onLights = devices.filter((d) => d.type === 'light' && isDeviceOn(d));
     if (onLights.length === 0) return;
 
     for (const light of onLights) {
-      setDevices((prev) =>
-        prev.map((d) => (d.id === light.id ? { ...d, state: { ...d.state, power: 'off' } } : d))
-      );
+      setDevices((prev) => {
+        const next: DeviceItem[] = prev.map((d) => (d.id === light.id ? { ...d, state: { ...d.state, power: 'off' as const } } : d));
+        saveHistory(next);
+        return next;
+      });
       mqttManager.publishCommand(light.room, light.id, { power: 'off' });
     }
     setLastActionMessage(`[MQTT] Đã tắt ${onLights.length} đèn.`);
-  }, [devices]);
+  }, [devices, saveHistory]);
 
   // ------------------------------------------------------------- Counts & Stats
   const counts = useMemo(() => {
