@@ -91,6 +91,7 @@ class TurnResult:
     plan: CommandPlan | None = None
     report: DispatchReport | None = None
     needs_clarification: bool = False
+    thought: str | None = None
     latency_ms: dict[str, float] = field(default_factory=dict)
     error: str | None = None
 
@@ -98,6 +99,7 @@ class TurnResult:
         return {
             "session_id": self.session_id,
             "user_text": self.user_text,
+            "thought": self.thought,
             "speech": self.speech,
             "plan": self.plan.as_dict() if self.plan else None,
             "dispatched": self.report.delivered_count if self.report else 0,
@@ -390,6 +392,7 @@ class Orchestrator:
             plan=plan,
             report=report,
             needs_clarification=reply.needs_clarification,
+            thought=reply.thought,
             latency_ms=latency,
             error=stream_error,
         )
@@ -398,6 +401,7 @@ class Orchestrator:
             "turn complete",
             extra={
                 "session_id": session_id,
+                "thought": reply.thought,
                 "plan": plan.summary() if plan else "no commands",
                 "latency_ms": {k: round(v) for k, v in latency.items()},
                 # Spoken reply as it actually left the server. Zero bytes with a

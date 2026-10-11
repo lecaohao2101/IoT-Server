@@ -38,6 +38,17 @@ class AssistantReply(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    thought: str = Field(
+        default="",
+        description=(
+            "Suy nghĩ nội tâm từng bước (Chain-of-Thought) bằng tiếng Việt trước khi quyết định: "
+            "1. Ý định & Cảm xúc (phân tích tâm lý/mong muốn của người dùng) -> "
+            "2. Ngữ cảnh Đa lượt (kết nối với các lượt nói trước, xem có câu hỏi làm rõ đang chờ không) -> "
+            "3. Không gian & Thiết bị (xác định phòng, map chính xác device_id và capability) -> "
+            "4. Trạng thái & An toàn (đối chiếu trạng thái hiện tại, kiểm tra giới hạn) -> "
+            "5. Giải pháp (đưa ra hành động tối ưu hoặc câu hỏi làm rõ nếu mơ hồ)."
+        ),
+    )
     speech: str = Field(
         description=(
             "Câu trả lời bằng tiếng Việt, ngắn gọn, tự nhiên, tối đa 2 câu. "
@@ -62,6 +73,11 @@ def response_json_schema() -> dict[str, Any]:
     """JSON Schema handed to the provider for constrained decoding."""
     schema = AssistantReply.model_json_schema()
     schema["title"] = "AssistantReply"
+    req = schema.get("required", [])
+    for field_name in ("thought", "speech"):
+        if field_name not in req:
+            req.append(field_name)
+    schema["required"] = req
     return schema
 
 

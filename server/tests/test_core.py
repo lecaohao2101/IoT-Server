@@ -38,6 +38,18 @@ def test_streaming_field_decodes_across_chunk_boundaries():
     assert extractor.done
 
 
+def test_streaming_field_decodes_when_preceded_by_thought():
+    extractor = StreamingStringField("speech")
+    chunks = [
+        '{"thought": "1. Ý định: Bật đèn phòng khách. 2. Thiết bị: living_room_light.", ',
+        '"speech": "Dạ mình bật ',
+        'đèn ngay nhé!", "commands": []}',
+    ]
+    out = "".join(extractor.feed(c) for c in chunks)
+    assert out == "Dạ mình bật đèn ngay nhé!"
+    assert extractor.done
+
+
 def test_streaming_field_handles_escapes_split_mid_sequence():
     extractor = StreamingStringField("speech")
     pieces = ['{"speech": "a\\', 'nb \\u00e9 c"}']

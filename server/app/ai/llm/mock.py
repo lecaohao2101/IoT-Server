@@ -597,13 +597,17 @@ class MockLanguageModel(LanguageModel):
         words = _ON_WORDS + _OFF_WORDS + _UP_WORDS + _DOWN_WORDS
         return any(w.strip() in norm for w in words)
 
-    def _current_room(self, system: str) -> str | None:
+    def _current_room(self, system: str | None) -> str | None:
+        if not system:
+            return None
         match = _ROOM_RE.search(system)
         return match.group(1) if match else None
 
     @staticmethod
-    def _parse_state(system: str) -> dict[str, dict[str, str]]:
+    def _parse_state(system: str | None) -> dict[str, dict[str, str]]:
         state: dict[str, dict[str, str]] = {}
+        if not system:
+            return state
         for device_id, body in _STATE_LINE_RE.findall(system):
             values: dict[str, str] = {}
             for pair in body.split(","):
