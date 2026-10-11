@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from fastapi.testclient import TestClient
 
 
@@ -19,8 +21,8 @@ def test_update_status_updates_leds_and_sensors(client: TestClient) -> None:
             "wc": True,
         },
         "servos": {
-            "lr_angle": 30,
-            "bed_angle": 0,
+            "lr_curtain": 60,
+            "bed_curtain": 0,
         },
         "sensors": {
             "temp": 28.5,
@@ -35,7 +37,7 @@ def test_update_status_updates_leds_and_sensors(client: TestClient) -> None:
     data = res.json()
     assert data["success"] is True
     assert "living_room_light" in data["updated"]
-    assert "living_room_ac" in data["updated"]
+    assert "living_room_curtain" in data["updated"]
     assert "living_room_sensor" in data["updated"]
     assert "bedroom_sensor" in data["updated"]
 
@@ -48,8 +50,8 @@ def test_update_status_updates_leds_and_sensors(client: TestClient) -> None:
     assert data["states"]["study"] == 0
     assert data["states"]["balcony"] == 1
     assert data["states"]["wc"] == 1
-    assert data["states"]["lr_angle"] == 30
-    assert data["states"]["bed_angle"] == 0
+    assert data["states"]["lr_curtain"] == 60
+    assert data["states"]["bed_curtain"] == 0
 
     # Verify returned room-based structure
     assert "rooms" in data
@@ -62,9 +64,16 @@ def test_update_status_updates_leds_and_sensors(client: TestClient) -> None:
     lr_light = client.get("/api/v1/devices/living_room_light").json()
     assert lr_light["state"]["power"] == "on"
 
-    lr_ac = client.get("/api/v1/devices/living_room_ac").json()
-    assert lr_ac["state"]["power"] == "on"
-    assert lr_ac["state"]["vane_angle"] == 30
+    # Both servos are curtains; the air conditioners move nothing at all, so a
+    # servo report must never be read back as an AC that turned itself on.
+    lr_curtain = client.get("/api/v1/devices/living_room_curtain").json()
+    assert lr_curtain["state"]["position"] == 60
+    assert lr_curtain["state"]["state"] == "open"
+
+    bed_curtain = client.get("/api/v1/devices/bedroom_curtain").json()
+    assert bed_curtain["state"]["state"] == "closed"
+
+    assert client.get("/api/v1/devices/living_room_ac").json()["state"]["power"] == "off"
 
     lr_sensor = client.get("/api/v1/devices/living_room_sensor").json()
     assert lr_sensor["state"]["temperature"] == 28.5
@@ -81,7 +90,63 @@ def test_poll_commands_returns_current_pin_states(client: TestClient) -> None:
     data = res.json()
     assert data["success"] is True
     assert "lr_main" in data["states"]
-    assert "lr_angle" in data["states"]
+    assert "lr_curtain" in data["states"]
+
+
+def test_an_open_curtain_reaches_the_board_as_a_position(client: TestClient) -> None:
+    """The two servos are the curtains, and the board steers them by percent.
+
+    "mo rem" carries no number, so the position left over from the last run
+    would keep the servo shut if the route simply echoed it back.
+    """
+    res = client.post(
+        "/api/v1/devices/living_room_curtain/command",
+        json={"capability": "state", "value": "open"},
+    )
+    assert res.status_code == 202
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        states = client.get("/poll-commands").json()["states"]
+        if states["lr_curtain"] > 0:
+            break
+        time.sleep(0.05)
+    assert states["lr_curtain"] == 100
+
+    client.post(
+        "/api/v1/devices/living_room_curtain/command",
+        json={"capability": "position", "value": 40},
+    )
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline:
+        states = client.get("/poll-commands").json()["states"]
+        if states["lr_curtain"] == 40:
+            break
+        time.sleep(0.05)
+    assert states["lr_curtain"] == 40
+
+
+def test_the_air_conditioner_moves_no_hardware(client: TestClient) -> None:
+    """It is a number on an LCD, nothing else -- no servo answers to it.
+
+    Both servos belong to the curtains now, so an AC command that still moved
+    one would swing a curtain every time somebody asked for 24 degrees.
+    """
+    before = client.get("/poll-commands").json()["states"]
+
+    res = client.post(
+        "/api/v1/devices/living_room_ac/command",
+        json={"capability": "temperature", "value": 24},
+    )
+    assert res.status_code == 202
+
+    after = client.get("/poll-commands").json()["states"]
+    assert after["lr_curtain"] == before["lr_curtain"]
+    assert after["bed_curtain"] == before["bed_curtain"]
+
+    # And the vane the servo used to stand for is gone from the catalogue.
+    ac = client.get("/api/v1/devices/living_room_ac").json()
+    assert "vane_angle" not in ac["state"]
 
 
 def test_upload_audio_short_payload_rejected(client: TestClient) -> None:

@@ -10,18 +10,23 @@
 static Servo servo_lr;
 static Servo servo_bed;
 
-// Tách riêng biệt trạng thái đèn và trạng thái điều hòa / servo
+// Tách riêng biệt trạng thái đèn, rèm (servo) và điều hòa (ảo)
 static bool state_lr_light      = false;
 static bool state_kitchen_light = false;
 static bool state_bed_light     = false;
 static bool state_balcony_light = false;
 
+// Điều hòa KHÔNG nối với phần cứng nào. Hai biến này chỉ là con số người dùng
+// vừa yêu cầu, để LCD hiện lên và để báo ngược trạng thái lên MQTT.
 static bool state_lr_ac         = false;
 static int  temp_lr_ac          = 26;
-static int  current_lr_angle    = SERVO_ANGLE_CLOSE;
 static bool state_bed_ac        = false;
 static int  temp_bed_ac         = 26;
-static int  current_bed_angle   = SERVO_ANGLE_CLOSE;
+
+// Hai servo là RÈM CỬA. Giữ vị trí theo phần trăm (0 = đóng hẳn, 100 = mở hết)
+// chứ không giữ góc: góc chỉ là cách servo thể hiện vị trí đó ra ngoài.
+static int  pos_lr_curtain      = 0;
+static int  pos_bed_curtain     = 0;
 
 // Quản lý tự động ngắt xung PWM (detach) sau khi servo quay xong vị trí
 // Giúp chống sụt áp nguồn 5V và triệt tiêu tiếng rè/rung (jitter) của servo SG90
@@ -40,23 +45,29 @@ static unsigned long lastDebounce_bed     = 0;
 static unsigned long lastDebounce_balcony = 0;
 static constexpr unsigned long DEBOUNCE_DELAY_MS = 200;
 
-static void moveServoLR(int angle) {
-  angle = constrain(angle, 0, 180);
-  current_lr_angle = angle;
+// Vị trí rèm (%) -> góc servo. Nội suy tuyến tính giữa hai mốc trong Config.h
+// để đổi tầm quay của rèm là sửa đúng một chỗ.
+static int curtainAngle(int position) {
+  position = constrain(position, 0, 100);
+  return SERVO_CURTAIN_CLOSE +
+         (SERVO_CURTAIN_OPEN - SERVO_CURTAIN_CLOSE) * position / 100;
+}
+
+static void setCurtainLR(int position) {
+  pos_lr_curtain = constrain(position, 0, 100);
   if (!servo_lr.attached()) {
     servo_lr.attach(PIN_SERVO_LR, 500, 2400);
   }
-  servo_lr.write(angle);
+  servo_lr.write(curtainAngle(pos_lr_curtain));
   servo_lr_detach_ms = millis() + 500;
 }
 
-static void moveServoBed(int angle) {
-  angle = constrain(angle, 0, 180);
-  current_bed_angle = angle;
+static void setCurtainBed(int position) {
+  pos_bed_curtain = constrain(position, 0, 100);
   if (!servo_bed.attached()) {
     servo_bed.attach(PIN_SERVO_BED, 500, 2400);
   }
-  servo_bed.write(angle);
+  servo_bed.write(curtainAngle(pos_bed_curtain));
   servo_bed_detach_ms = millis() + 500;
 }
 
@@ -73,7 +84,7 @@ void updateServos() {
 }
 
 void refreshLCDDevices(bool wifiOk) {
-  updateLCDLivingRoomDevices(state_lr_light, state_lr_ac, temp_lr_ac, state_bed_ac, temp_bed_ac, wifiOk);
+  updateLCDLivingRoomDevices(state_lr_light, state_lr_ac, temp_lr_ac, wifiOk);
   updateLCDBedroomDevices(state_bed_light, state_bed_ac, temp_bed_ac, (digitalRead(PIN_LED_STUDY) == HIGH));
 }
 
@@ -81,6 +92,9 @@ int getLivingRoomACTemp()   { return temp_lr_ac; }
 int getBedroomACTemp()      { return temp_bed_ac; }
 bool getLivingRoomACState() { return state_lr_ac; }
 bool getBedroomACState()    { return state_bed_ac; }
+
+int getLivingRoomCurtainPosition() { return pos_lr_curtain; }
+int getBedroomCurtainPosition()    { return pos_bed_curtain; }
 
 void initControls() {
   int outputs[] = {
@@ -102,8 +116,8 @@ void initControls() {
   ESP32PWM::allocateTimer(1);
   servo_lr.setPeriodHertz(50);
   servo_bed.setPeriodHertz(50);
-  moveServoLR(SERVO_ANGLE_CLOSE);
-  moveServoBed(SERVO_ANGLE_CLOSE);
+  setCurtainLR(0);
+  setCurtainBed(0);
   refreshLCDDevices(false);
 }
 
@@ -272,14 +286,27 @@ void setDeviceActuator(const String& deviceId, bool power, int value, int target
     showLCDNotify(1, power ? "[BAL] ON DEN   " : "[BAL] OFF DEN   ", 2000);
   } else if (deviceId == "bathroom_light") {
     digitalWrite(PIN_LED_WC, power ? HIGH : LOW);
+  } else if (deviceId == "living_room_curtain") {
+    // Rèm = servo. Lệnh không kèm vị trí thì mở / đóng hết cỡ.
+    int position = (value >= 0) ? value : (power ? 100 : 0);
+    setCurtainLR(position);
+    char notifyBuf[17];
+    snprintf(notifyBuf, sizeof(notifyBuf), "[LR] REM %d%%", pos_lr_curtain);
+    showLCDNotify(1, notifyBuf, 2000);
+  } else if (deviceId == "bedroom_curtain") {
+    int position = (value >= 0) ? value : (power ? 100 : 0);
+    setCurtainBed(position);
+    char notifyBuf[17];
+    snprintf(notifyBuf, sizeof(notifyBuf), "[BR] REM %d%%", pos_bed_curtain);
+    showLCDNotify(2, notifyBuf, 2000);
   } else if (deviceId == "living_room_ac") {
+    // Điều hòa chỉ tồn tại trên màn hình: không servo, không rơ-le. Việc duy
+    // nhất xảy ra là LCD hiện con số người dùng vừa yêu cầu.
     if (targetTemp > 0) {
       temp_lr_ac = targetTemp;
       power = true;
     }
-    int angle = (value >= 0) ? value : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-    moveServoLR(angle);
-    state_lr_ac = power || (angle > 0);
+    state_lr_ac = power;
     char notifyBuf[17];
     if (state_lr_ac) {
       snprintf(notifyBuf, sizeof(notifyBuf), "[LR-AC] %d*C", temp_lr_ac);
@@ -292,23 +319,21 @@ void setDeviceActuator(const String& deviceId, bool power, int value, int target
       temp_bed_ac = targetTemp;
       power = true;
     }
-    int angle = (value >= 0) ? value : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-    moveServoBed(angle);
-    state_bed_ac = power || (angle > 0);
+    state_bed_ac = power;
     char notifyBuf[17];
     if (state_bed_ac) {
       snprintf(notifyBuf, sizeof(notifyBuf), "[BR-AC] %d*C", temp_bed_ac);
     } else {
       snprintf(notifyBuf, sizeof(notifyBuf), "[BR-AC] OFF");
     }
-    showLCDNotify(0, notifyBuf, 2000);
+    showLCDNotify(2, notifyBuf, 2000);
   }
   refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 }
 
-void syncAllFromStates(int lr_main, int lr_sofa, int kit_main, int bed_main, int bed_side, int study, int balcony, int wc, int lr_angle, int bed_angle) {
-  Serial.printf("[ACTUATOR-SYNC] Đồng bộ GPIO: LR[%d,%d,AC:%d°] KIT[%d] BED[%d,%d,AC:%d°] BAL[%d]\n",
-                lr_main, lr_sofa, lr_angle, kit_main, bed_main, bed_side, bed_angle, balcony);
+void syncAllFromStates(int lr_main, int lr_sofa, int kit_main, int bed_main, int bed_side, int study, int balcony, int wc, int lr_curtain, int bed_curtain) {
+  Serial.printf("[ACTUATOR-SYNC] Đồng bộ GPIO: LR[%d,%d,REM:%d%%] KIT[%d] BED[%d,%d,REM:%d%%] BAL[%d]\n",
+                lr_main, lr_sofa, lr_curtain, kit_main, bed_main, bed_side, bed_curtain, balcony);
   if (lr_main >= 0) {
     digitalWrite(PIN_LED_LR_MAIN, lr_main ? HIGH : LOW);
     state_lr_light = (lr_main != 0);
@@ -330,14 +355,8 @@ void syncAllFromStates(int lr_main, int lr_sofa, int kit_main, int bed_main, int
   }
   if (wc >= 0) digitalWrite(PIN_LED_WC, wc ? HIGH : LOW);
 
-  if (lr_angle >= 0) {
-    moveServoLR(lr_angle);
-    state_lr_ac = (lr_angle > 0);
-  }
-  if (bed_angle >= 0) {
-    moveServoBed(bed_angle);
-    state_bed_ac = (bed_angle > 0);
-  }
+  if (lr_curtain >= 0) setCurtainLR(lr_curtain);
+  if (bed_curtain >= 0) setCurtainBed(bed_curtain);
   refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 }
 
@@ -359,7 +378,18 @@ void publishAllDeviceStates() {
   mqttPublishState("bedroom", "study_light", study ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
   mqttPublishState("balcony", "balcony_light", bal ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
   mqttPublishState("bathroom", "bathroom_light", wc ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
-  mqttPublishState("living_room", "living_room_ac", state_lr_ac ? ("{\"power\":\"on\",\"vane_angle\":" + String(current_lr_angle > 0 ? current_lr_angle : SERVO_ANGLE_OPEN) + "}").c_str() : "{\"power\":\"off\",\"vane_angle\":0}");
-  mqttPublishState("bedroom", "bedroom_ac", state_bed_ac ? ("{\"power\":\"on\",\"vane_angle\":" + String(current_bed_angle > 0 ? current_bed_angle : SERVO_ANGLE_OPEN) + "}").c_str() : "{\"power\":\"off\",\"vane_angle\":0}");
+  String lrCurtainJson = String("{\"state\":\"") + (pos_lr_curtain > 0 ? "open" : "closed") +
+                         "\",\"position\":" + String(pos_lr_curtain) + "}";
+  String bedCurtainJson = String("{\"state\":\"") + (pos_bed_curtain > 0 ? "open" : "closed") +
+                          "\",\"position\":" + String(pos_bed_curtain) + "}";
+  mqttPublishState("living_room", "living_room_curtain", lrCurtainJson.c_str());
+  mqttPublishState("bedroom", "bedroom_curtain", bedCurtainJson.c_str());
+
+  String lrAcJson = String("{\"power\":\"") + (state_lr_ac ? "on" : "off") +
+                    "\",\"temperature\":" + String(temp_lr_ac) + "}";
+  String bedAcJson = String("{\"power\":\"") + (state_bed_ac ? "on" : "off") +
+                     "\",\"temperature\":" + String(temp_bed_ac) + "}";
+  mqttPublishState("living_room", "living_room_ac", lrAcJson.c_str());
+  mqttPublishState("bedroom", "bedroom_ac", bedAcJson.c_str());
   Serial.println("[MQTT-SYNC] Đã đồng bộ trạng thái thực tế toàn bộ thiết bị lên MQTT Broker (Retained)");
 }

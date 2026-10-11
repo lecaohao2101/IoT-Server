@@ -217,7 +217,7 @@ export function DeviceControlView({
                         </View>
                       )}
 
-                      {/* Chỉnh điều hòa: Nhiệt độ và Cánh gió Servo */}
+                      {/* Chỉnh điều hòa: chỉ có nhiệt độ, và nó chỉ đi tới LCD của board */}
                       {device.type === 'air_conditioner' && (
                         <View style={styles.acControlBlock}>
                           <View style={styles.acTempRow}>
@@ -248,37 +248,28 @@ export function DeviceControlView({
                               </Pressable>
                             </View>
                           </View>
+                        </View>
+                      )}
 
-                          <View style={styles.acVaneRow}>
-                            <Text style={styles.subLabel}>Cánh gió Servo:</Text>
-                            <View style={styles.presetButtons}>
-                              <Pressable
-                                onPress={() => onSetCapability(device, 'vane_angle', 0)}
-                                style={[styles.presetBtn, device.state.vane_angle === 0 && styles.presetBtnActive]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.presetBtnText,
-                                    device.state.vane_angle === 0 && styles.presetBtnTextActive,
-                                  ]}
+                      {/* Chỉnh rèm: đúng hai con servo trên board */}
+                      {device.type === 'curtain' && (
+                        <View style={styles.subRow}>
+                          <Text style={styles.subLabel}>Độ mở:</Text>
+                          <View style={styles.presetButtons}>
+                            {[0, 50, 100].map((level) => {
+                              const active = device.state.position === level;
+                              return (
+                                <Pressable
+                                  key={level}
+                                  onPress={() => onSetCapability(device, 'position', level)}
+                                  style={[styles.presetBtn, active && styles.presetBtnActive]}
                                 >
-                                  Đóng (0°)
-                                </Text>
-                              </Pressable>
-                              <Pressable
-                                onPress={() => onSetCapability(device, 'vane_angle', 30)}
-                                style={[styles.presetBtn, device.state.vane_angle === 30 && styles.presetBtnActive]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.presetBtnText,
-                                    device.state.vane_angle === 30 && styles.presetBtnTextActive,
-                                  ]}
-                                >
-                                  Mở (30°)
-                                </Text>
-                              </Pressable>
-                            </View>
+                                  <Text style={[styles.presetBtnText, active && styles.presetBtnTextActive]}>
+                                    {level}%
+                                  </Text>
+                                </Pressable>
+                              );
+                            })}
                           </View>
                         </View>
                       )}
@@ -477,5 +468,4 @@ const styles = StyleSheet.create({
   },
   stepBtnText: { color: colors.text, fontSize: 18, fontWeight: '700' },
   tempValue: { color: colors.text, fontSize: 15, fontWeight: '700', minWidth: 42, textAlign: 'center' },
-  acVaneRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
 });

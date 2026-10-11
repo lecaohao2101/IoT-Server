@@ -27,12 +27,14 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   // Nhận diện trạng thái power: hỗ trợ cả bare string ("on", "off", "1", "0", "true", "false")
   // lẫn JSON ({"set":{"power":"on"}}, {"power":"on"}, {"state":"open"}, v.v.)
   bool powerOn = (pLower == "on" || pLower == "\"on\"" || pLower == "true" || pLower == "1" ||
+                  pLower == "open" || pLower == "\"open\"" ||
                   pLower.indexOf("\"power\":\"on\"") != -1 || pLower.indexOf("\"power\": \"on\"") != -1 ||
                   pLower.indexOf("\"state\":\"on\"") != -1 || pLower.indexOf("\"state\": \"on\"") != -1 ||
                   pLower.indexOf("\"power\":true") != -1 || pLower.indexOf("\"power\": true") != -1 ||
                   pLower.indexOf("\"state\":\"open\"") != -1);
 
   bool powerOff = (pLower == "off" || pLower == "\"off\"" || pLower == "false" || pLower == "0" ||
+                   pLower == "closed" || pLower == "\"closed\"" ||
                    pLower.indexOf("\"power\":\"off\"") != -1 || pLower.indexOf("\"power\": \"off\"") != -1 ||
                    pLower.indexOf("\"state\":\"off\"") != -1 || pLower.indexOf("\"state\": \"off\"") != -1 ||
                    pLower.indexOf("\"power\":false") != -1 || pLower.indexOf("\"power\": false") != -1 ||
@@ -42,10 +44,11 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
   bool hasPowerCmd = (powerOn || powerOff);
   bool power = powerOn;
 
+  // Vị trí rèm theo phần trăm, do server gửi trong trường "position".
   int val = -1;
-  int angleIdx = pLower.indexOf("\"vane_angle\":");
-  if (angleIdx != -1) {
-    val = pLower.substring(angleIdx + 13).toInt();
+  int posIdx = pLower.indexOf("\"position\":");
+  if (posIdx != -1) {
+    val = pLower.substring(posIdx + 11).toInt();
   }
 
   int tempVal = -1;
@@ -58,11 +61,17 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
       tempVal = pLower.substring(tempIdx + 7).toInt();
     }
   }
+  // Topic giá trị trần (home/<room>/<device>/set/temperature) chỉ mang con số.
   if (tempVal <= 0 && t.indexOf("_ac") != -1) {
     int parsedNum = pLower.toInt();
     if (parsedNum >= 16 && parsedNum <= 35) {
       tempVal = parsedNum;
     }
+  }
+
+  // Tương tự cho rèm: .../set/position chỉ mang số phần trăm.
+  if (val < 0 && t.indexOf("/set/position") != -1) {
+    val = constrain(pLower.toInt(), 0, 100);
   }
 
   const char* pState = power ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}";
@@ -108,22 +117,35 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
       setDeviceActuator("bathroom_light", power);
       mqttPublishState("bathroom", "bathroom_light", pState);
     }
+  } else if (t.indexOf("living_room_curtain") != -1) {
+    // Rèm = servo. "open"/"closed" đến qua powerOn/powerOff, "position" qua val.
+    if (hasPowerCmd || val >= 0) {
+      setDeviceActuator("living_room_curtain", powerOn, val, -1);
+      int pos = getLivingRoomCurtainPosition();
+      String json = "{\"state\":\"" + String(pos > 0 ? "open" : "closed") + "\",\"position\":" + String(pos) + "}";
+      mqttPublishState("living_room", "living_room_curtain", json.c_str());
+    }
+  } else if (t.indexOf("bedroom_curtain") != -1) {
+    if (hasPowerCmd || val >= 0) {
+      setDeviceActuator("bedroom_curtain", powerOn, val, -1);
+      int pos = getBedroomCurtainPosition();
+      String json = "{\"state\":\"" + String(pos > 0 ? "open" : "closed") + "\",\"position\":" + String(pos) + "}";
+      mqttPublishState("bedroom", "bedroom_curtain", json.c_str());
+    }
   } else if (t.indexOf("living_room_ac") != -1) {
-    if (hasPowerCmd || tempVal > 0 || val >= 0) {
-      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || (val > 0) || getLivingRoomACState());
-      setDeviceActuator("living_room_ac", effectivePower, val, tempVal);
-      int angle = (val >= 0) ? val : (effectivePower ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-      int curTemp = (tempVal > 0) ? tempVal : getLivingRoomACTemp();
-      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(curTemp) + ",\"vane_angle\":" + String(angle) + "}";
+    // Điều hòa không có phần cứng: nhận lệnh chỉ để LCD hiện nhiệt độ
+    // người dùng vừa yêu cầu, rồi báo ngược trạng thái đó lên broker.
+    if (hasPowerCmd || tempVal > 0) {
+      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || getLivingRoomACState());
+      setDeviceActuator("living_room_ac", effectivePower, -1, tempVal);
+      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(getLivingRoomACTemp()) + "}";
       mqttPublishState("living_room", "living_room_ac", acJson.c_str());
     }
   } else if (t.indexOf("bedroom_ac") != -1) {
-    if (hasPowerCmd || tempVal > 0 || val >= 0) {
-      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || (val > 0) || getBedroomACState());
-      setDeviceActuator("bedroom_ac", effectivePower, val, tempVal);
-      int angle = (val >= 0) ? val : (effectivePower ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-      int curTemp = (tempVal > 0) ? tempVal : getBedroomACTemp();
-      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(curTemp) + ",\"vane_angle\":" + String(angle) + "}";
+    if (hasPowerCmd || tempVal > 0) {
+      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || getBedroomACState());
+      setDeviceActuator("bedroom_ac", effectivePower, -1, tempVal);
+      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(getBedroomACTemp()) + "}";
       mqttPublishState("bedroom", "bedroom_ac", acJson.c_str());
     }
   }
@@ -184,6 +206,8 @@ void loopMQTT() {
         mqttPublishDeviceAvailability("bedroom", "study_light", true);
         mqttPublishDeviceAvailability("balcony", "balcony_light", true);
         mqttPublishDeviceAvailability("bathroom", "bathroom_light", true);
+        mqttPublishDeviceAvailability("living_room", "living_room_curtain", true);
+        mqttPublishDeviceAvailability("bedroom", "bedroom_curtain", true);
         mqttPublishDeviceAvailability("living_room", "living_room_ac", true);
         mqttPublishDeviceAvailability("bedroom", "bedroom_ac", true);
         Serial.println("[MQTT] ESP32 sẵn sàng nhận trạng thái đồng bộ từ App!");

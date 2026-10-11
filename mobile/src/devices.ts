@@ -20,7 +20,6 @@ export type DeviceState = {
   power?: 'on' | 'off';
   brightness?: number;
   temperature?: number;
-  vane_angle?: number;
   state?: 'open' | 'closed' | 'stop';
   position?: number;
   volume?: number;
@@ -65,8 +64,17 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     type: 'air_conditioner',
     room: 'living_room',
     roomName: 'Phòng khách',
-    capabilities: ['power', 'temperature', 'mode', 'fan_speed', 'vane_angle'],
-    state: { power: 'off', temperature: 26, vane_angle: 0, online: true },
+    capabilities: ['power', 'temperature', 'mode', 'fan_speed'],
+    state: { power: 'off', temperature: 26, online: true },
+  },
+  {
+    id: 'living_room_curtain',
+    name: 'Rèm phòng khách',
+    type: 'curtain',
+    room: 'living_room',
+    roomName: 'Phòng khách',
+    capabilities: ['state', 'position'],
+    state: { state: 'closed', position: 0, online: true },
   },
 
   // --- Phòng bếp (kitchen) ---
@@ -114,8 +122,17 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     type: 'air_conditioner',
     room: 'bedroom',
     roomName: 'Phòng ngủ',
-    capabilities: ['power', 'temperature', 'mode', 'fan_speed', 'vane_angle'],
-    state: { power: 'off', temperature: 26, vane_angle: 0, online: true },
+    capabilities: ['power', 'temperature', 'mode', 'fan_speed'],
+    state: { power: 'off', temperature: 26, online: true },
+  },
+  {
+    id: 'bedroom_curtain',
+    name: 'Rèm phòng ngủ',
+    type: 'curtain',
+    room: 'bedroom',
+    roomName: 'Phòng ngủ',
+    capabilities: ['state', 'position'],
+    state: { state: 'closed', position: 0, online: true },
   },
 
   // --- Ban công (balcony) ---

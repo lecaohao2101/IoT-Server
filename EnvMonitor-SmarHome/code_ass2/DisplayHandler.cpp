@@ -12,11 +12,11 @@ static char last_line0_bed[17]  = "";
 static char last_line1_bed[17]  = "";
 
 // Cache trạng thái thiết bị gần nhất
+// Mỗi màn hình chỉ giữ thiết bị của phòng mình: trộn phòng nọ sang phòng kia
+// là cách chắc chắn khiến người đứng trước màn hình đọc nhầm số của phòng bên.
 static bool cached_lr_light = false;
 static bool cached_lr_ac    = false;
 static int  cached_lr_temp  = 26;
-static bool cached_br_ac    = false;
-static int  cached_br_temp  = 26;
 static bool cached_wifi_ok  = false;
 
 static bool cached_bed_light = false;
@@ -74,7 +74,7 @@ void checkLCDNotifyTimeout() {
   if (lr_notify_until_ms != 0 && (long)(now - lr_notify_until_ms) >= 0) {
     lr_notify_until_ms = 0;
     last_line0_lr[0] = '\0'; // Ép cập nhật lại trạng thái thiết bị
-    updateLCDLivingRoomDevices(cached_lr_light, cached_lr_ac, cached_lr_temp, cached_br_ac, cached_br_temp, cached_wifi_ok);
+    updateLCDLivingRoomDevices(cached_lr_light, cached_lr_ac, cached_lr_temp, cached_wifi_ok);
   }
   if (bed_notify_until_ms != 0 && (long)(now - bed_notify_until_ms) >= 0) {
     bed_notify_until_ms = 0;
@@ -83,12 +83,10 @@ void checkLCDNotifyTimeout() {
   }
 }
 
-void updateLCDLivingRoomDevices(bool lrLightOn, bool lrAcOn, int lrTemp, bool brAcOn, int brTemp, bool wifiOk) {
-  cached_lr_light = lrLightOn;
-  cached_lr_ac    = lrAcOn;
-  cached_lr_temp  = lrTemp;
-  cached_br_ac    = brAcOn;
-  cached_br_temp  = brTemp;
+void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acTemp, bool wifiOk) {
+  cached_lr_light = lightOn;
+  cached_lr_ac    = acOn;
+  cached_lr_temp  = acTemp;
   cached_wifi_ok  = wifiOk;
 
   unsigned long now = millis();
@@ -98,25 +96,22 @@ void updateLCDLivingRoomDevices(bool lrLightOn, bool lrAcOn, int lrTemp, bool br
   lr_notify_until_ms = 0;
 
   char line0[17];
-  
-  // LR: Phòng khách - nếu có mở AC thì hiện nhiệt độ, không thì hiện ON/OFF đèn
-  char lr_buf[5];
-  if (lrAcOn && lrTemp > 0) {
-    snprintf(lr_buf, sizeof(lr_buf), "%d*", lrTemp);
-  } else {
-    snprintf(lr_buf, sizeof(lr_buf), "%s", lrLightOn ? "ON" : "OFF");
-  }
 
-  // BR: Phòng ngủ - hiển thị realtime nhiệt độ điều hòa (vd: 24*, 25*) hoặc OFF
-  char br_buf[5];
-  if (brAcOn && brTemp > 0) {
-    snprintf(br_buf, sizeof(br_buf), "%d*", brTemp);
+  // "LR:ON  AC:24* OK" -- đèn phòng khách, nhiệt độ điều hòa NGƯỜI DÙNG YÊU
+  // CẦU, và Wi-Fi. Số sau "AC:" không đo từ đâu cả -- điều hòa trong nhà này
+  // không có phần cứng, nó là mức người dùng vừa đặt. Nhiệt độ THẬT của
+  // phòng nằm ở dòng 1, do DHT11 đo.
+  const char* light_str = lightOn ? "ON" : "OFF";
+
+  char ac_buf[5];
+  if (acOn && acTemp > 0) {
+    snprintf(ac_buf, sizeof(ac_buf), "%d*", acTemp);
   } else {
-    snprintf(br_buf, sizeof(br_buf), "OFF");
+    snprintf(ac_buf, sizeof(ac_buf), "OFF");
   }
 
   const char* wifi_str = wifiOk ? "OK" : "--";
-  snprintf(line0, sizeof(line0), "LR:%-3s BR:%-3s %2s", lr_buf, br_buf, wifi_str);
+  snprintf(line0, sizeof(line0), "LR:%-3s AC:%-3s %2s", light_str, ac_buf, wifi_str);
 
   if (strcmp(line0, last_line0_lr) != 0) {
     strncpy(last_line0_lr, line0, sizeof(last_line0_lr));
@@ -155,17 +150,6 @@ void updateLCDBedroomDevices(bool lightOn, bool acOn, int acTemp, bool extraLigh
   }
 }
 
-// Các hàm overload tương thích ngược
-void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acAngle, bool wifiOk) {
-  int t = (acAngle > 0 && acAngle <= 35) ? acAngle : 26;
-  updateLCDLivingRoomDevices(lightOn, acOn, t, acOn, t, wifiOk);
-}
-
-void updateLCDBedroomDevices(bool lightOn, bool acOn, int acAngle, bool extraLight, bool legacyTag) {
-  int t = (acAngle > 0 && acAngle <= 35) ? acAngle : 26;
-  updateLCDBedroomDevices(lightOn, acOn, t, extraLight);
-}
-
 void updateLCDLivingRoomSensors(float temp, float hum, bool isDhtValid) {
   char line1[17];
   if (isDhtValid) {
@@ -198,7 +182,7 @@ void updateLCDBedroomSensors(float dist, int soundLevel) {
 
 // Các hàm tương thích ngược
 void updateLCDWiFiStatus(bool connected) {
-  updateLCDLivingRoomDevices(cached_lr_light, cached_lr_ac, cached_lr_temp, cached_br_ac, cached_br_temp, connected);
+  updateLCDLivingRoomDevices(cached_lr_light, cached_lr_ac, cached_lr_temp, connected);
 }
 
 void updateLCDLivingRoom(float temp, float hum, bool isDhtValid) {

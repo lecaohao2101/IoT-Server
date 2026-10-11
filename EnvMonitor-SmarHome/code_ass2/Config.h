@@ -39,12 +39,14 @@ constexpr int PIN_I2S_WS  = 15; // Chân WS / LRCK
 constexpr int PIN_SDA = 8;
 constexpr int PIN_SCL = 9;
 
-// Servo
-constexpr int PIN_SERVO_LR  = 47;
-constexpr int PIN_SERVO_BED = 48;
+// Servo — hai con servo này đóng vai RÈM CỬA, không phải cánh gió điều hòa.
+constexpr int PIN_SERVO_LR  = 47;   // rèm phòng khách
+constexpr int PIN_SERVO_BED = 48;   // rèm phòng ngủ
 
-constexpr int SERVO_ANGLE_OPEN  = 30;
-constexpr int SERVO_ANGLE_CLOSE = 0;
+// Góc ứng với rèm đóng hẳn và rèm mở hết. Vị trí rèm (0..100%) được nội suy
+// tuyến tính giữa hai mốc này, nên chỉnh ở đây là chỉnh cho cả hai rèm.
+constexpr int SERVO_CURTAIN_CLOSE = 0;
+constexpr int SERVO_CURTAIN_OPEN  = 90;
 
 // API Server URL (Đã cấu hình server deployed trên Cloud Fly.io)
 const char SERVER_API_URL[] = "https://smart-apartment-server.fly.dev";

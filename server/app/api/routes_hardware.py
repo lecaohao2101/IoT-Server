@@ -1,7 +1,7 @@
 """Hardware compatibility router for the ESP32 smart home microcontroller.
 
 Bridges communication with the EnvMonitor-SmarHome firmware:
-- POST /update-status: Ingests button triggers, LED status, servo angles, and sensor readings.
+- POST /update-status: Ingests button triggers, LED status, curtain positions, and sensor readings.
 - POST /upload-audio: Receives 16kHz PCM audio buffers from the INMP441 microphone and executes commands.
 - GET /poll-commands: Returns current authoritative device and pin states.
 """
@@ -50,6 +50,14 @@ LED_DEVICE_MAP: dict[str, str] = {
     "wc": "bathroom_light",
 }
 
+#: The board carries exactly two servos, and both of them are curtains. An
+#: earlier revision wired them to the air-conditioner vanes; the ACs have no
+#: hardware at all now, so nothing here reports one.
+SERVO_DEVICE_MAP: dict[str, str] = {
+    "lr_curtain": "living_room_curtain",
+    "bed_curtain": "bedroom_curtain",
+}
+
 
 async def _build_pin_states(container: Container) -> dict[str, int]:
     """Helper to read current authoritative states and format as hardware pin states."""
@@ -58,13 +66,19 @@ async def _build_pin_states(container: Container) -> dict[str, int]:
     def _is_on(device_id: str) -> int:
         return 1 if snapshot.value(device_id, "power") == "on" else 0
 
-    lr_angle = snapshot.value("living_room_ac", "vane_angle", 0)
-    if snapshot.value("living_room_ac", "power") != "on":
-        lr_angle = 0
-
-    bed_angle = snapshot.value("bedroom_ac", "vane_angle", 0)
-    if snapshot.value("bedroom_ac", "power") != "on":
-        bed_angle = 0
+    # The two servos on the board are the curtains, so what the firmware needs
+    # back is a position in percent -- the board turns that into an angle. The
+    # air conditioners drive nothing: they only reach the LCD.
+    def _curtain_position(device_id: str) -> int:
+        position = int(snapshot.value(device_id, "position", 0) or 0)
+        state = snapshot.value(device_id, "state")
+        if state == "closed":
+            return 0
+        # "mở rèm" carries no percentage, and the position left over from the
+        # last run would otherwise keep the servo shut on an explicit open.
+        if state == "open" and position == 0:
+            return 100
+        return position
 
     return {
         "lr_main": _is_on("living_room_light"),
@@ -75,8 +89,8 @@ async def _build_pin_states(container: Container) -> dict[str, int]:
         "study": _is_on("study_light"),
         "balcony": _is_on("balcony_light"),
         "wc": _is_on("bathroom_light"),
-        "lr_angle": int(lr_angle),
-        "bed_angle": int(bed_angle),
+        "lr_curtain": _curtain_position("living_room_curtain"),
+        "bed_curtain": _curtain_position("bedroom_curtain"),
     }
 
 
@@ -137,24 +151,17 @@ async def update_status(payload: HardwareStatusPayload, container: Container) ->
             await container.state.set_availability(device_id, True)
             updated_devices.append(device_id)
 
-    # 2. Update Servos (Living room & Bedroom AC vanes)
-    if "lr_angle" in payload.servos:
-        angle = int(payload.servos["lr_angle"])
-        power_val = "on" if angle > 0 else "off"
+    # 2. Update servos -- both of them are curtains, reported as a percentage.
+    for servo_key, device_id in SERVO_DEVICE_MAP.items():
+        if servo_key not in payload.servos:
+            continue
+        position = max(0, min(100, int(payload.servos[servo_key])))
         await container.state.apply_reported(
-            "living_room_ac", {"vane_angle": angle, "power": power_val}
+            device_id,
+            {"position": position, "state": "open" if position > 0 else "closed"},
         )
-        await container.state.set_availability("living_room_ac", True)
-        updated_devices.append("living_room_ac")
-
-    if "bed_angle" in payload.servos:
-        angle = int(payload.servos["bed_angle"])
-        power_val = "on" if angle > 0 else "off"
-        await container.state.apply_reported(
-            "bedroom_ac", {"vane_angle": angle, "power": power_val}
-        )
-        await container.state.set_availability("bedroom_ac", True)
-        updated_devices.append("bedroom_ac")
+        await container.state.set_availability(device_id, True)
+        updated_devices.append(device_id)
 
     # 3. Update Sensors
     sensor_living: dict[str, Any] = {}

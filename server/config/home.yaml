@@ -77,6 +77,8 @@ devices:
         unit: "%"
         default: 80
 
+  # Không có phần cứng nào sau điều hòa: board chỉ hiện nhiệt độ vừa được
+  # đặt lên LCD. Nhiệt độ THẬT của phòng nằm ở *_sensor, do DHT11 đo.
   - id: living_room_ac
     name: "Điều hòa phòng khách"
     type: air_conditioner
@@ -102,15 +104,8 @@ devices:
         kind: enum
         values: ["auto", "low", "medium", "high"]
         default: "auto"
-      vane_angle:
-        kind: number
-        minimum: 0
-        maximum: 90
-        step: 1
-        unit: "°"
-        default: 0
-        description: "Góc mở cánh gió servo (0 = đóng, 30 = mở)"
 
+  # Servo GPIO47 trên board ESP32-S3. position 0% = đóng hẳn, 100% = mở hết.
   - id: living_room_curtain
     name: "Rèm phòng khách"
     type: curtain
@@ -286,6 +281,7 @@ devices:
         unit: "%"
         default: 80
 
+  # Như living_room_ac: thiết bị hiển thị, không có rơ-le nào đi kèm.
   - id: bedroom_ac
     name: "Điều hòa phòng ngủ"
     type: air_conditioner
@@ -311,20 +307,13 @@ devices:
         kind: enum
         values: ["auto", "low", "medium", "high"]
         default: "auto"
-      vane_angle:
-        kind: number
-        minimum: 0
-        maximum: 90
-        step: 1
-        unit: "°"
-        default: 0
-        description: "Góc mở cánh gió servo (0 = đóng, 30 = mở)"
 
+  # Servo GPIO48 trên cùng board.
   - id: bedroom_curtain
     name: "Rèm phòng ngủ"
     type: curtain
     room: bedroom
-    aliases: ["rèm phòng ngủ"]
+    aliases: ["rèm phòng ngủ", "rèm cửa phòng ngủ", "màn phòng ngủ"]
     capabilities:
       state:
         kind: enum

@@ -8,14 +8,12 @@ extern LiquidCrystal_I2C lcd_bed;
 
 void initLCDs();
 
-// Cập nhật trạng thái thiết bị thời gian thực (Dòng 0)
-// Hỗ trợ hiển thị LR:OFF/ON và BR:24*/OFF theo thời gian thực tùy chỉnh
-void updateLCDLivingRoomDevices(bool lrLightOn, bool lrAcOn, int lrTemp, bool brAcOn, int brTemp, bool wifiOk);
+// Cập nhật trạng thái thiết bị thời gian thực (Dòng 0).
+// `acTemp` là nhiệt độ NGƯỜI DÙNG VỪA YÊU CẦU, không phải số đo của cảm biến
+// nào: điều hòa trong nhà này chỉ tồn tại trên màn hình. Nhiệt độ thật của
+// phòng nằm ở dòng 1, do DHT11 đo.
+void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acTemp, bool wifiOk);
 void updateLCDBedroomDevices(bool lightOn, bool acOn, int acTemp, bool extraLight = false);
-
-// Hàm tương thích với chữ ký cũ
-void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acAngle, bool wifiOk);
-void updateLCDBedroomDevices(bool lightOn, bool acOn, int acAngle, bool extraLight, bool legacyTag);
 
 // Cập nhật cảm biến (Dòng 1)
 void updateLCDLivingRoomSensors(float temp, float hum, bool isDhtValid);

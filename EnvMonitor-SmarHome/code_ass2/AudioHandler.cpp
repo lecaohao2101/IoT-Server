@@ -111,14 +111,16 @@ static void applyStateChanged(const String& msg) {
   if (deviceId.isEmpty()) return;
 
   String power = jsonStr(msg, "power");
-  int vane = jsonInt(msg, "vane_angle", -1);
+  String curtain = jsonStr(msg, "state");       // rèm: "open" / "closed"
+  int position = jsonInt(msg, "position", -1);  // rèm: 0..100%
   int temp = jsonInt(msg, "temperature", -1);
   if (temp < 0) temp = jsonInt(msg, "temp", -1);
-  if (power.isEmpty() && vane < 0 && temp < 0) return;
+  if (power.isEmpty() && curtain.isEmpty() && position < 0 && temp < 0) return;
 
-  Serial.printf("[VOICE-STATE] %s -> %s (góc: %d, temp: %d)\n", deviceId.c_str(),
-                power.isEmpty() ? "-" : power.c_str(), vane, temp);
-  setDeviceActuator(deviceId, power == "on", vane, temp);
+  bool on = (power == "on") || (curtain == "open");
+  Serial.printf("[VOICE-STATE] %s -> %s (vị trí: %d%%, temp: %d)\n", deviceId.c_str(),
+                on ? "on" : "off", position, temp);
+  setDeviceActuator(deviceId, on, position, temp);
 }
 
 static void handleServerMessage(const String& msg) {

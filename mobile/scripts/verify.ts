@@ -230,8 +230,19 @@ test('token KHÔNG được nhúng sẵn trong app', () => {
 import { DEFAULT_DEVICES, isDeviceOn, getDeviceStatusLabel, type DeviceItem } from '../src/devices.ts';
 import { DEFAULT_MQTT_SETTINGS } from '../src/settings.ts';
 
-test('DEFAULT_DEVICES chứa đúng 10 thiết bị phần cứng thực tế của căn hộ', () => {
-  assert.equal(DEFAULT_DEVICES.length, 10);
+test('DEFAULT_DEVICES chứa đúng 12 thiết bị phần cứng thực tế của căn hộ', () => {
+  assert.equal(DEFAULT_DEVICES.length, 12);
+});
+
+test('hai con servo trên board là hai cái RÈM, không phải cánh gió điều hòa', () => {
+  const curtains = DEFAULT_DEVICES.filter((d) => d.type === 'curtain').map((d) => d.id);
+  assert.deepEqual(curtains, ['living_room_curtain', 'bedroom_curtain']);
+
+  // Điều hòa không điều khiển gì cả, nó chỉ hiện nhiệt độ lên LCD của board --
+  // còn thuộc tính cánh gió nào ở đây là còn một nút bấm không làm gì.
+  for (const ac of DEFAULT_DEVICES.filter((d) => d.type === 'air_conditioner')) {
+    assert.equal(ac.capabilities.includes('vane_angle'), false, ac.id);
+  }
 });
 
 test('isDeviceOn nhận diện đúng trạng thái BẬT và TẮT của đèn', () => {
