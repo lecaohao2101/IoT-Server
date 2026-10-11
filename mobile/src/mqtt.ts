@@ -87,7 +87,15 @@ class MqttManager {
 
       this.client.onConnectionLost = (response) => {
         const errorMsg = response.errorMessage || 'Mất kết nối MQTT';
-        console.warn('[MQTT] Connection lost:', errorMsg);
+        // Lần rớt đầu tiên không đáng gọi là cảnh báo. React Native treo
+        // WebSocket mỗi khi app xuống nền, và Metro reload cũng đóng socket --
+        // cả hai đều tự nối lại sau vài giây. Bật LogBox đỏ cho chuyện đó chỉ
+        // làm người đọc quen với việc bỏ qua cảnh báo, rồi bỏ qua luôn cái thật.
+        if (this.reconnectAttempts === 0) {
+          console.log('[MQTT] Mất kết nối, đang nối lại:', errorMsg);
+        } else {
+          console.warn(`[MQTT] Vẫn chưa nối lại được sau ${this.reconnectAttempts} lần:`, errorMsg);
+        }
         this.setStatus('disconnected', errorMsg);
         if (this.shouldStayConnected) {
           this.scheduleReconnect();
