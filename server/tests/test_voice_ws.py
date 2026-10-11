@@ -104,15 +104,9 @@ def test_full_voice_turn_produces_transcript_reply_and_audio(client: TestClient)
         assert final["text"]
 
         assert final["latency_ms"]["total"] >= 0
-        # Chính sách bắt xác nhận trước mọi thao tác: lượt này mới là câu hỏi,
-        # chưa có gì xuống thiết bị.
-        assert final["plan"]["pending_confirmation"], final["plan"]
-        assert not final["plan"]["accepted"]
-
-        # Đồng ý bằng lời, trên chính socket đó -- đúng như người dùng làm.
-        ws.send_json({"type": "text", "text": "vâng"})
-        confirmed, _ = _collect(ws, "assistant.final")
-        accepted = confirmed[-1]["plan"]["accepted"]
+        # confirm_all=false: một câu nói trọn vẹn đi thẳng xuống thiết bị.
+        assert not final["plan"]["pending_confirmation"], final["plan"]
+        accepted = final["plan"]["accepted"]
         assert any(c["device_id"] == "living_room_light" for c in accepted)
 
 
@@ -179,9 +173,7 @@ def test_text_frame_skips_recognition_entirely(client: TestClient):
 
         assert "stt.final" not in [f["type"] for f in frames]
 
-        assert (
-            frames[-1]["plan"]["pending_confirmation"][0]["device_id"] == "bedroom_light"
-        )
+        assert frames[-1]["plan"]["accepted"][0]["device_id"] == "bedroom_light"
 
 
 
@@ -382,16 +374,13 @@ def test_one_socket_carries_several_utterances_back_to_back(client: TestClient):
 
 
 
-            # Mỗi câu đều dừng ở câu hỏi. Xác nhận ngay rồi mới sang câu sau:
-            # để câu hỏi treo lại thì lượt kế tiếp bị hiểu thành câu trả lời
-            # cho nó, chứ không phải một yêu cầu mới.
+            # confirm_all=false: mỗi câu tự đi xuống thiết bị, không để lại câu
+            # hỏi treo. Đó cũng là lý do câu thứ hai được hiểu như một yêu cầu
+            # mới chứ không phải lời đáp cho câu hỏi của lượt trước.
             plan = frames[-1]["plan"]
-            assert plan["pending_confirmation"], plan
-            devices.append([c["device_id"] for c in plan["pending_confirmation"]])
-
-            ws.send_json({"type": "text", "text": "vâng"})
-            done, _ = _collect(ws, "assistant.final")
-            assert done[-1]["plan"]["accepted"], "lời đồng ý không đưa lệnh đi"
+            assert plan["accepted"], plan
+            assert not plan["pending_confirmation"], plan
+            devices.append([c["device_id"] for c in plan["accepted"]])
 
         assert all("living_room_light" in d for d in devices)
 
@@ -823,9 +812,7 @@ def test_a_typed_frame_does_not_need_the_name(client: TestClient):
         ws.send_json({"type": "text", "text": "bật đèn bếp"})
         frames, _ = _collect(ws, "assistant.final")
 
-    # Chủ đề của test này là từ khoá đánh thức, nên chỉ cần lệnh ĐƯỢC ĐỀ XUẤT.
-    # Việc nó dừng chờ xác nhận là chuyện của chính sách, test khác lo.
-    assert (
-        frames[-1]["plan"]["pending_confirmation"][0]["device_id"] == "kitchen_light"
-    )
+    # Chủ đề của test này là từ khoá đánh thức, nên chỉ cần lệnh ĐI QUA được.
+    # Việc nó dừng chờ xác nhận hay không là chuyện của chính sách, test khác lo.
+    assert frames[-1]["plan"]["accepted"][0]["device_id"] == "kitchen_light"
 

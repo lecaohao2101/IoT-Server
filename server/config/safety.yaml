@@ -21,7 +21,7 @@ require_device_online: false      # bật true nếu muốn từ chối lệnh t
 # "vâng". Nút bấm trên app KHÔNG bị ảnh hưởng -- cái chạm đó đã là xác nhận rồi.
 #
 # Đặt false để quay về nếp cũ: làm ngay, chỉ hỏi với thao tác nhạy cảm.
-confirm_all: true
+confirm_all: false
 
 quiet_hours:
   enabled: true

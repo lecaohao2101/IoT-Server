@@ -168,18 +168,14 @@ def test_chat_turn_controls_a_device(client: TestClient):
         "/api/v1/chat",
         json={"text": "bật đèn phòng khách", "room": "living_room", "session_id": session},
     ).json()
-    # Chính sách bắt xác nhận trước mọi thao tác: lượt đầu chỉ hỏi lại.
+    # confirm_all=false: lệnh thường đi thẳng xuống thiết bị, không hỏi lại.
+    # Chỉ thuộc tính đánh dấu `sensitive` mới dừng chờ xác nhận -- xem
+    # test_safety.py để biết phần đó vẫn được giữ nguyên.
     assert asked["speech"]
-    assert asked["plan"]["pending_confirmation"], asked["plan"]
-    assert not asked["plan"]["accepted"]
-    assert asked["dispatched"] == 0
-
-    done = client.post(
-        "/api/v1/chat", json={"text": "vâng", "session_id": session}
-    ).json()
-    accepted = done["plan"]["accepted"]
+    assert not asked["plan"]["pending_confirmation"], asked["plan"]
+    accepted = asked["plan"]["accepted"]
     assert any(c["device_id"] == "living_room_light" and c["value"] == "on" for c in accepted)
-    assert done["dispatched"] >= 1
+    assert asked["dispatched"] >= 1
 
 
 def test_chat_keeps_session_history(client: TestClient):

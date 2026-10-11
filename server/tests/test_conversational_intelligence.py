@@ -35,15 +35,12 @@ async def test_proactive_reasoning_sleepy_flow(container):
         session_id=session_id, user_text="ừ tắt đi", speak=False
     )
     assert res2.needs_clarification is False
-    # Lượt này mới chỉ ĐỀ XUẤT. Chính sách bắt xác nhận trước mọi thao tác, nên
-    # chưa có gì xuống thiết bị và câu trả lời phải là một câu hỏi.
-    assert res2.plan is not None and res2.plan.pending_confirmation
-    assert not res2.plan.accepted, "đèn đã tắt trước khi người dùng đồng ý"
-    assert res2.speech.rstrip().endswith("?"), res2.speech
-
-    # Turn 3: người dùng đồng ý -> lúc này lệnh mới thật sự chạy
-    res3 = await orchestrator.run_turn(session_id=session_id, user_text="vâng", speak=False)
-    assert any(c.capability == "power" and c.value == "off" for c in res3.plan.accepted)
+    # "ừ tắt đi" CHÍNH LÀ lời đồng ý với đề xuất ở lượt 1. Với confirm_all=false
+    # đèn tắt ngay tại lượt này -- hỏi thêm một lần nữa là bắt người dùng đồng ý
+    # hai lần cho cùng một việc.
+    assert res2.plan is not None and res2.plan.accepted
+    assert not res2.plan.pending_confirmation, res2.plan
+    assert any(c.capability == "power" and c.value == "off" for c in res2.plan.accepted)
 
 
 async def test_proactive_reasoning_darkness_flow(container):
@@ -64,11 +61,9 @@ async def test_proactive_reasoning_darkness_flow(container):
         session_id=session_id, user_text="có bật đi", speak=False
     )
     assert res2.needs_clarification is False
-    assert res2.plan is not None and res2.plan.pending_confirmation
-    assert not res2.plan.accepted, "đèn đã bật trước khi người dùng đồng ý"
-
-    res3 = await orchestrator.run_turn(session_id=session_id, user_text="vâng", speak=False)
-    assert any(c.capability == "power" and c.value == "on" for c in res3.plan.accepted)
+    assert res2.plan is not None and res2.plan.accepted
+    assert not res2.plan.pending_confirmation, res2.plan
+    assert any(c.capability == "power" and c.value == "on" for c in res2.plan.accepted)
 
 
 async def test_multi_turn_room_disambiguation_flow(container):
@@ -89,12 +84,10 @@ async def test_multi_turn_room_disambiguation_flow(container):
         session_id=session_id, user_text="phòng khách", speak=False
     )
     assert res2.needs_clarification is False
-    assert res2.plan is not None and res2.plan.pending_confirmation
+    assert res2.plan is not None and res2.plan.accepted
     assert "phòng khách" in res2.speech.lower()
-
-    res3 = await orchestrator.run_turn(session_id=session_id, user_text="vâng", speak=False)
     assert any(
-        c.device_id == "living_room_light" and c.value == "on" for c in res3.plan.accepted
+        c.device_id == "living_room_light" and c.value == "on" for c in res2.plan.accepted
     )
 
 
@@ -145,12 +138,9 @@ async def test_device_mentioned_without_command_situational_awareness(container)
         session_id=session_id, user_text="ừ bật đi", speak=False
     )
     assert res2.needs_clarification is False
-    assert res2.plan is not None and res2.plan.pending_confirmation
+    assert res2.plan is not None and res2.plan.accepted
     assert "đèn phòng khách" in res2.speech.lower()
-
-    # Turn 3: đồng ý -> lệnh mới xuống thiết bị
-    res3 = await orchestrator.run_turn(session_id=session_id, user_text="vâng", speak=False)
     assert any(
-        c.device_id == "living_room_light" and c.value == "on" for c in res3.plan.accepted
+        c.device_id == "living_room_light" and c.value == "on" for c in res2.plan.accepted
     )
 
