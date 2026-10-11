@@ -743,15 +743,15 @@ class MockLanguageModel(LanguageModel):
 
         elif device.type is DeviceType.WATER_HEATER:
             if is_on:
-                speech = f"Bình nước nóng đang bật đó bạn. Bạn muốn mình tắt đi hay để đun tiếp nè?"
+                speech = "Bình nước nóng đang bật đó bạn. Bạn muốn mình tắt đi hay để đun tiếp nè?"
             else:
-                speech = f"Bình nóng lạnh hiện đang tắt. Bạn có muốn mình bật lên để chuẩn bị nước ấm không?"
+                speech = "Bình nóng lạnh hiện đang tắt. Bạn có muốn mình bật lên để chuẩn bị nước ấm không?"
 
         elif device.type is DeviceType.FAN:
             if is_on:
-                speech = f"Quạt đang chạy nè. Bạn muốn mình tăng giảm gió hay tắt quạt đi ạ?"
+                speech = "Quạt đang chạy nè. Bạn muốn mình tăng giảm gió hay tắt quạt đi ạ?"
             else:
-                speech = f"Quạt hiện đang tắt. Bạn có muốn mình bật quạt cho mát không nè?"
+                speech = "Quạt hiện đang tắt. Bạn có muốn mình bật quạt cho mát không nè?"
 
         else:
             if is_on:
