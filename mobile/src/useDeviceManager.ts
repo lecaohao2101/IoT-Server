@@ -21,6 +21,9 @@ export function useDeviceManager(settings: Settings | null) {
   const settingsRef = useRef<Settings | null>(settings);
   settingsRef.current = settings;
 
+  // Hàng đợi lưu các lệnh được bấm trong lúc ESP32 đang reboot/offline
+  const pendingCommandsRef = useRef<Record<string, { room: string; values: Record<string, any> }>>({});
+
   // ------------------------------------------------------------- MQTT Sync
   useEffect(() => {
     if (!settings?.mqtt) return;
@@ -56,6 +59,15 @@ export function useDeviceManager(settings: Settings | null) {
           state: { ...dev.state, online: isOnline },
         }))
       );
+
+      // Nếu ESP32 vừa online và có lệnh người dùng đã bấm lúc đang reboot: Tự động gửi ngay!
+      if (isOnline && Object.keys(pendingCommandsRef.current).length > 0) {
+        console.log('[MQTT] ESP32 vừa online! Tự động gửi lại các lệnh đã xếp hàng...');
+        for (const [id, cmd] of Object.entries(pendingCommandsRef.current)) {
+          mqttManager.publishCommand(cmd.room, id, cmd.values);
+        }
+        pendingCommandsRef.current = {};
+      }
       return;
     }
 
@@ -73,6 +85,13 @@ export function useDeviceManager(settings: Settings | null) {
       setDevices((prev) =>
         prev.map((dev) => (dev.id === deviceId ? { ...dev, state: { ...dev.state, online: isOnline } } : dev))
       );
+
+      if (isOnline && pendingCommandsRef.current[deviceId]) {
+        const cmd = pendingCommandsRef.current[deviceId];
+        delete pendingCommandsRef.current[deviceId];
+        console.log(`[MQTT] Thiết bị ${deviceId} vừa online! Tự động gửi lại lệnh...`);
+        mqttManager.publishCommand(cmd.room, deviceId, cmd.values);
+      }
       return;
     }
 
@@ -188,10 +207,21 @@ export function useDeviceManager(settings: Settings | null) {
       prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d))
     );
 
+    const actionText = `${nextValues.power === 'on' || nextValues.state === 'open' || nextValues.locked === false ? 'Bật' : 'Tắt'} ${device.name}`;
+    const isOnline = device.state?.online !== false;
+
+    if (!isOnline) {
+      // Thiết bị hoặc board đang offline (ví dụ đang flash/reboot lại .ino)
+      pendingCommandsRef.current[device.id] = { room: device.room, values: nextValues };
+      setLastActionMessage(`[ESP32 đang khởi động] Đã nhận lệnh: ${actionText}. Sẽ tự động áp dụng khi thiết bị online!`);
+      return;
+    }
+
+    delete pendingCommandsRef.current[device.id];
+
     // 1. Direct MQTT publish
     const mqttSent = mqttManager.publishCommand(device.room, device.id, nextValues);
 
-    const actionText = `${nextValues.power === 'on' || nextValues.state === 'open' || nextValues.locked === false ? 'Bật' : 'Tắt'} ${device.name}`;
     if (mqttSent) {
       setLastActionMessage(`[MQTT] Đã gửi lệnh: ${actionText}`);
     } else {
@@ -216,6 +246,15 @@ export function useDeviceManager(settings: Settings | null) {
     setDevices((prev) =>
       prev.map((d) => (d.id === device.id ? { ...d, state: { ...d.state, ...nextValues } } : d))
     );
+
+    const isOnline = device.state?.online !== false;
+    if (!isOnline) {
+      pendingCommandsRef.current[device.id] = { room: device.room, values: nextValues };
+      setLastActionMessage(`[ESP32 đang khởi động] Đã xếp hàng: ${device.name} (${capability} = ${value})`);
+      return;
+    }
+
+    delete pendingCommandsRef.current[device.id];
 
     // Send direct MQTT command
     mqttManager.publishCommand(device.room, device.id, nextValues);

@@ -165,6 +165,9 @@ void loopMQTT() {
         mqttPublishDeviceAvailability("bathroom", "bathroom_light", true);
         mqttPublishDeviceAvailability("living_room", "living_room_ac", true);
         mqttPublishDeviceAvailability("bedroom", "bedroom_ac", true);
+
+        // Công bố trạng thái thực tế của toàn bộ thiết bị lên broker (Retained)
+        publishAllDeviceStates();
       } else {
         Serial.printf("[MQTT-ERR] Kết nối thất bại, state rc=%d (sẽ thử lại sau 5s)\n", mqttClient.state());
       }
