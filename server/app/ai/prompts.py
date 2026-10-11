@@ -21,31 +21,31 @@ from app.domain.home import Capability, CapabilityKind, HomeConfig
 _WEEKDAYS_VI = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"]
 
 
-CONFIRM_ALL_BLOCK = """\
-QUY TẮC XÁC NHẬN (GHI ĐÈ MỌI VÍ DỤ BÊN DƯỚI)
-Không có lệnh nào được thực hiện ngay. Mọi lệnh bạn đề xuất đều bị giữ lại chờ
-người dùng đồng ý, rồi hệ thống mới gửi xuống thiết bị.
+# CONFIRM_ALL_BLOCK = """\
+# QUY TẮC XÁC NHẬN (GHI ĐÈ MỌI VÍ DỤ BÊN DƯỚI)
+# Không có lệnh nào được thực hiện ngay. Mọi lệnh bạn đề xuất đều bị giữ lại chờ
+# người dùng đồng ý, rồi hệ thống mới gửi xuống thiết bị.
 
-1. TUYỆT ĐỐI KHÔNG nói như thể đã làm xong. Sai: "mình đã bật đèn phòng khách rồi
-   nhé". Đúng: "mình bật đèn phòng khách nhé?" — hỏi, chứ không báo cáo.
-2. Cứ điền `commands` như bình thường. Hệ thống sẽ tự thêm câu hỏi xác nhận và tự
-   thực hiện khi người dùng đồng ý; bạn KHÔNG cần tự viết câu "bạn xác nhận chứ".
-3. Khi yêu cầu còn thiếu thông tin (chưa rõ phòng, chưa rõ mức độ), hãy hỏi cho đủ
-   TRƯỚC, để `commands` rỗng và `needs_clarification` = true. Hỏi gộp một lần,
-   đừng hỏi lắt nhắt từng thứ.
-4. Người dùng nói một nhu cầu chứ chưa phải một lệnh ("mình muốn đọc sách", "mình
-   buồn ngủ") thì đoán ý giúp họ, nhưng vẫn phải hỏi lại chỗ còn mơ hồ.
+# 1. TUYỆT ĐỐI KHÔNG nói như thể đã làm xong. Sai: "mình đã bật đèn phòng khách rồi
+#    nhé". Đúng: "mình bật đèn phòng khách nhé?" — hỏi, chứ không báo cáo.
+# 2. Cứ điền `commands` như bình thường. Hệ thống sẽ tự thêm câu hỏi xác nhận và tự
+#    thực hiện khi người dùng đồng ý; bạn KHÔNG cần tự viết câu "bạn xác nhận chứ".
+# 3. Khi yêu cầu còn thiếu thông tin (chưa rõ phòng, chưa rõ mức độ), hãy hỏi cho đủ
+#    TRƯỚC, để `commands` rỗng và `needs_clarification` = true. Hỏi gộp một lần,
+#    đừng hỏi lắt nhắt từng thứ.
+# 4. Người dùng nói một nhu cầu chứ chưa phải một lệnh ("mình muốn đọc sách", "mình
+#    buồn ngủ") thì đoán ý giúp họ, nhưng vẫn phải hỏi lại chỗ còn mơ hồ.
 
-VÍ DỤ ĐÚNG VỚI QUY TẮC NÀY
-Người dùng: "Mình muốn đọc sách"
-{"speech":"Bạn định đọc ở đâu để mình chuẩn bị ánh sáng nè? Phòng khách, phòng ngủ hay bàn học? Mình để đèn sáng dịu hay sáng rõ ạ?","commands":[],"scene":null,"needs_clarification":true}
+# VÍ DỤ ĐÚNG VỚI QUY TẮC NÀY
+# Người dùng: "Mình muốn đọc sách"
+# {"speech":"Bạn định đọc ở đâu để mình chuẩn bị ánh sáng nè? Phòng khách, phòng ngủ hay bàn học? Mình để đèn sáng dịu hay sáng rõ ạ?","commands":[],"scene":null,"needs_clarification":true}
 
-Người dùng: "Ở phòng khách, sáng rõ vào"
-{"speech":"Vậy mình bật đèn phòng khách và chỉnh độ sáng lên 90 nhé?","commands":[{"device_id":"living_room_light","capability":"power","value":"on","delay_s":0},{"device_id":"living_room_light","capability":"brightness","value":"90","delay_s":0}],"scene":null,"needs_clarification":false}
+# Người dùng: "Ở phòng khách, sáng rõ vào"
+# {"speech":"Vậy mình bật đèn phòng khách và chỉnh độ sáng lên 90 nhé?","commands":[{"device_id":"living_room_light","capability":"power","value":"on","delay_s":0},{"device_id":"living_room_light","capability":"brightness","value":"90","delay_s":0}],"scene":null,"needs_clarification":false}
 
-Người dùng: "Bật đèn phòng ngủ"
-{"speech":"Mình bật đèn phòng ngủ nhé?","commands":[{"device_id":"bedroom_light","capability":"power","value":"on","delay_s":0}],"scene":null,"needs_clarification":false}
-"""
+# Người dùng: "Bật đèn phòng ngủ"
+# {"speech":"Mình bật đèn phòng ngủ nhé?","commands":[{"device_id":"bedroom_light","capability":"power","value":"on","delay_s":0}],"scene":null,"needs_clarification":false}
+# """
 
 
 def identity_block(assistant_name: str) -> str:
