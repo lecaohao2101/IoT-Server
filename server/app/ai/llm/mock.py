@@ -189,8 +189,29 @@ class MockLanguageModel(LanguageModel):
         is_turn_on_confirm = is_affirmative or any(norm == w or norm.startswith(w + " ") for w in ("bat di", "bat len", "bat giup", "bat den di"))
 
         if last_assistant_norm:
-            # Đề xuất tắt đèn trước đó
-            if is_turn_off_confirm and any(w in last_assistant_norm for w in ("tat den", "de ngu khong", "tat bot den")):
+            # Tìm xem lượt trước trợ lý đang nói về thiết bị cụ thể nào
+            referred_device = None
+            for d in self._home.devices:
+                if d.name.lower() in last_assistant_norm or any(token and len(token) > 3 and token in last_assistant_norm for token in d.match_tokens()):
+                    referred_device = d
+                    break
+            if not referred_device and history:
+                prev_targets = self._carry_over(history, current_room)
+                if prev_targets:
+                    referred_device = prev_targets[0]
+
+            # Đề xuất tắt thiết bị trước đó
+            if is_turn_off_confirm and any(w in last_assistant_norm for w in ("tat den", "de ngu khong", "tat bot den", "tat di", "tat may lanh", "keo lai")):
+                if referred_device:
+                    power_cap = self._power_capability(referred_device.writable_capabilities)
+                    if power_cap:
+                        cmds = [self._cmd(referred_device, power_cap, self._power_value(power_cap, on=False))]
+                        return {
+                            "speech": f"Vâng, mình đã tắt {referred_device.name.lower()} cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
                 target_room = current_room or "bedroom"
                 lights = [d for d in self._home.devices if d.type is DeviceType.LIGHT and (d.room == target_room or not current_room)]
                 if not lights:
@@ -206,8 +227,57 @@ class MockLanguageModel(LanguageModel):
                     "scene": None,
                     "needs_clarification": False,
                 }
-            # Đề xuất bật đèn trước đó
-            if is_turn_on_confirm and any(w in last_assistant_norm for w in ("bat den", "cho sang khong", "sang khong")):
+
+            # Đề xuất bật thiết bị trước đó
+            if is_turn_on_confirm and any(w in last_assistant_norm for w in ("bat den", "cho sang khong", "sang khong", "bat len", "bat mat", "mo rem", "mo khoa")):
+                if referred_device:
+                    if referred_device.type is DeviceType.LIGHT:
+                        cmds = self._set_light_comfort(referred_device, brightness=100)
+                        return {
+                            "speech": f"Dạ được rồi, mình đã bật {referred_device.name.lower()} lên cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
+                    elif referred_device.type is DeviceType.AIR_CONDITIONER:
+                        cmds = self._set_ac_comfort(referred_device, state, temp=25)
+                        return {
+                            "speech": f"Dạ, mình đã bật {referred_device.name.lower()} ở 25 độ cho bạn rồi nhé!",
+                            "commands": cmds,
+                            "scene": None,
+                            "needs_clarification": False,
+                        }
+                    elif referred_device.type is DeviceType.CURTAIN:
+                        pos_cap = self._power_capability(referred_device.writable_capabilities)
+                        if pos_cap:
+                            cmds = [self._cmd(referred_device, pos_cap, self._power_value(pos_cap, on=True))]
+                            return {
+                                "speech": f"Dạ, mình đã mở {referred_device.name.lower()} cho thoáng rồi nhé!",
+                                "commands": cmds,
+                                "scene": None,
+                                "needs_clarification": False,
+                            }
+                    elif referred_device.type is DeviceType.LOCK:
+                        lock_cap = referred_device.writable_capabilities.get("locked")
+                        if lock_cap:
+                            cmds = [self._cmd(referred_device, lock_cap, "false")]
+                            return {
+                                "speech": f"Dạ, mình đã mở khóa {referred_device.name.lower()} cho bạn rồi nhé!",
+                                "commands": cmds,
+                                "scene": None,
+                                "needs_clarification": False,
+                            }
+                    else:
+                        power_cap = self._power_capability(referred_device.writable_capabilities)
+                        if power_cap:
+                            cmds = [self._cmd(referred_device, power_cap, self._power_value(power_cap, on=True))]
+                            return {
+                                "speech": f"Dạ được rồi, mình đã bật {referred_device.name.lower()} cho bạn rồi nhé!",
+                                "commands": cmds,
+                                "scene": None,
+                                "needs_clarification": False,
+                            }
+
                 target_room = current_room or "living_room"
                 light = self._find_device_of_type(DeviceType.LIGHT, target_room)
                 if light:
@@ -398,13 +468,7 @@ class MockLanguageModel(LanguageModel):
             commands.extend(self._commands_for(device, norm, state))
 
         if not commands:
-            device_name = targets[0].name.lower()
-            return {
-                "speech": f"Bạn muốn mình bật, tắt hay chỉnh gì cho {device_name} ạ?",
-                "commands": [],
-                "scene": None,
-                "needs_clarification": True,
-            }
+            return self._ask_device_intent(targets[0], state, norm)
 
         return {
             "speech": self._describe(targets, commands),
@@ -632,12 +696,82 @@ class MockLanguageModel(LanguageModel):
             return float(cap.minimum or 0)
 
     # --------------------------------------------------------------- speech
+    def _ask_device_intent(
+        self, device: Device, state: dict[str, dict[str, str]], norm: str
+    ) -> dict[str, Any]:
+        current = state.get(device.id, {})
+        dname = device.name.lower()
+        power = str(current.get("power", current.get("state", "off"))).lower()
+        is_on = power in ("on", "true", "1", "open")
+
+        if device.type is DeviceType.LIGHT:
+            brightness = current.get("brightness")
+            if is_on:
+                if brightness:
+                    speech = f"Đèn {dname} hiện đang bật ở mức {brightness}% nè. Bạn có muốn mình tắt đi hay đổi độ sáng không?"
+                else:
+                    speech = f"Đèn {dname} đang sáng đó bạn. Bạn muốn mình tắt đi hay chỉnh độ sáng nè?"
+            else:
+                speech = f"Đèn {dname} hiện đang tắt. Bạn có muốn mình bật lên cho sáng không nè?"
+
+        elif device.type is DeviceType.AIR_CONDITIONER:
+            temp = current.get("temperature", current.get("target_temperature", "25"))
+            if is_on:
+                speech = f"Điều hòa {dname} đang chạy ở {temp} độ nè. Bạn muốn mình tăng giảm nhiệt độ hay tắt máy lạnh đi ạ?"
+            else:
+                speech = f"Điều hòa {dname} hiện đang tắt. Bạn có muốn mình bật mát ở 25 độ không nè?"
+
+        elif device.type is DeviceType.CURTAIN:
+            pos = str(current.get("position", current.get("state", "closed"))).lower()
+            if is_on or pos in ("open", "100"):
+                speech = f"Rèm {dname} hiện đang mở đón ánh sáng. Bạn có muốn mình kéo lại cho râm mát không?"
+            else:
+                speech = f"Rèm {dname} đang đóng kín. Bạn có muốn mình mở rèm ra cho thoáng không nè?"
+
+        elif device.type is DeviceType.LOCK:
+            locked = str(current.get("locked", "true")).lower() in ("true", "1", "locked")
+            if locked:
+                speech = f"Khóa {dname} hiện đang khóa an toàn. Bạn có cần mình mở khóa không ạ?"
+            else:
+                speech = f"Khóa {dname} đang mở đó bạn ơi. Bạn có muốn mình khóa lại cho an toàn không?"
+
+        elif device.type in (DeviceType.TV, DeviceType.SPEAKER):
+            if is_on:
+                speech = f"{device.name} đang mở nè. Bạn muốn mình điều chỉnh âm lượng hay tắt đi không?"
+            else:
+                speech = f"{device.name} hiện đang tắt. Bạn có muốn mình bật lên để bạn giải trí không nè?"
+
+        elif device.type is DeviceType.WATER_HEATER:
+            if is_on:
+                speech = f"Bình nước nóng đang bật đó bạn. Bạn muốn mình tắt đi hay để đun tiếp nè?"
+            else:
+                speech = f"Bình nóng lạnh hiện đang tắt. Bạn có muốn mình bật lên để chuẩn bị nước ấm không?"
+
+        elif device.type is DeviceType.FAN:
+            if is_on:
+                speech = f"Quạt đang chạy nè. Bạn muốn mình tăng giảm gió hay tắt quạt đi ạ?"
+            else:
+                speech = f"Quạt hiện đang tắt. Bạn có muốn mình bật quạt cho mát không nè?"
+
+        else:
+            if is_on:
+                speech = f"{device.name} hiện đang bật hoạt động. Bạn có muốn mình tắt đi không nè?"
+            else:
+                speech = f"{device.name} hiện đang tắt. Bạn có muốn mình bật lên không?"
+
+        return {
+            "speech": speech,
+            "commands": [],
+            "scene": None,
+            "needs_clarification": True,
+        }
+
     def _answer_query(
         self, targets: list[Device], state: dict[str, dict[str, str]]
     ) -> dict[str, Any]:
         if not targets:
             return {
-                "speech": "Bạn muốn hỏi về thiết bị nào ạ?",
+                "speech": "Bạn muốn hỏi về thiết bị nào ạ? Đèn, điều hòa hay rèm cửa nè?",
                 "commands": [],
                 "scene": None,
                 "needs_clarification": True,
@@ -646,12 +780,39 @@ class MockLanguageModel(LanguageModel):
         for device in targets[:3]:
             values = state.get(device.id, {})
             if not values:
-                parts.append(f"{device.name} chưa có dữ liệu")
+                parts.append(f"{device.name} chưa có dữ liệu gửi về")
                 continue
-            rendered = ", ".join(f"{k} {v}" for k, v in list(values.items())[:3])
-            parts.append(f"{device.name}: {rendered}")
+            power = str(values.get("power", values.get("state", "off"))).lower()
+            is_on = power in ("on", "true", "1", "open")
+
+            if device.type is DeviceType.LIGHT:
+                bright = values.get("brightness")
+                if is_on:
+                    b_str = f" ở độ sáng {bright}%" if bright else ""
+                    parts.append(f"{device.name} đang bật{b_str}")
+                else:
+                    parts.append(f"{device.name} đang tắt")
+            elif device.type is DeviceType.AIR_CONDITIONER:
+                temp = values.get("temperature", values.get("target_temperature", "25"))
+                if is_on:
+                    parts.append(f"{device.name} đang bật ở {temp} độ")
+                else:
+                    parts.append(f"{device.name} đang tắt")
+            elif device.type is DeviceType.CURTAIN:
+                pos = str(values.get("position", values.get("state", "closed"))).lower()
+                if is_on or pos in ("open", "100"):
+                    parts.append(f"{device.name} đang mở")
+                else:
+                    parts.append(f"{device.name} đang đóng")
+            elif device.type is DeviceType.LOCK:
+                locked = str(values.get("locked", "true")).lower() in ("true", "1", "locked")
+                parts.append(f"{device.name} đang {'khóa an toàn' if locked else 'mở'}")
+            else:
+                rendered = ", ".join(f"{k} {v}" for k, v in list(values.items())[:2])
+                parts.append(f"{device.name} ({rendered})")
+
         return {
-            "speech": ". ".join(parts) + ".",
+            "speech": "Dạ, hiện tại " + ", và ".join(parts) + " bạn nhé.",
             "commands": [],
             "scene": None,
             "needs_clarification": False,

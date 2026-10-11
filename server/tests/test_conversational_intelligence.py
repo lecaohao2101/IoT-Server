@@ -110,3 +110,31 @@ async def test_human_empathy_and_smalltalk(container):
         session_id="test-empathy-3", user_text="bạn là ai thế", speak=False
     )
     assert "trợ lý thông minh" in res_who.speech.lower()
+
+
+async def test_device_mentioned_without_command_situational_awareness(container):
+    """When a device is mentioned with no action verb, assistant inspects its current state and asks intelligently."""
+    orchestrator = container.orchestrator
+    session_id = "test-device-situational-session"
+
+    # Turn 1: User mentions "đèn phòng khách" without action.
+    # The seeded state of living_room_light is OFF.
+    res1 = await orchestrator.run_turn(
+        session_id=session_id, user_text="đèn phòng khách", speak=False
+    )
+    assert res1.needs_clarification is True
+    # Must NOT be the old robotic template: "Bạn muốn mình bật, tắt hay chỉnh gì cho đèn phòng khách ạ?"
+    assert "bạn muốn mình bật, tắt hay chỉnh gì" not in res1.speech.lower()
+    # Must intelligently recognize that it is currently OFF and propose turning it on:
+    assert "hiện đang tắt" in res1.speech.lower() or "đang tắt" in res1.speech.lower()
+    assert "bật lên" in res1.speech.lower() or "bật" in res1.speech.lower()
+
+    # Turn 2: User says "ừ bật đi" -> Assistant executes command to turn it on!
+    res2 = await orchestrator.run_turn(
+        session_id=session_id, user_text="ừ bật đi", speak=False
+    )
+    assert res2.needs_clarification is False
+    assert res2.plan is not None and res2.plan.accepted
+    assert any(c.device_id == "living_room_light" and c.value == "on" for c in res2.plan.accepted)
+    assert "đèn phòng khách" in res2.speech.lower()
+
