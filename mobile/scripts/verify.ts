@@ -275,5 +275,20 @@ test('DEFAULT_MQTT_SETTINGS trỏ đúng broker HiveMQ Cloud TLS 8884', () => {
   assert.equal(DEFAULT_MQTT_SETTINGS.baseTopic, 'home');
 });
 
+// ------------------------------------------------------------------- Speaker Biometrics
+import { uint8ArrayToBase64 } from '../src/pcm.ts';
+
+test('uint8ArrayToBase64 mã hoá base64 chuẩn xác tương đương Buffer', () => {
+  const sample = new Uint8Array([72, 101, 108, 108, 111, 32, 87, 111, 114, 108, 100]); // "Hello World"
+  const encoded = uint8ArrayToBase64(sample);
+  assert.equal(encoded, Buffer.from(sample).toString('base64'));
+
+  const empty = new Uint8Array([]);
+  assert.equal(uint8ArrayToBase64(empty), '');
+
+  const single = new Uint8Array([42]);
+  assert.equal(uint8ArrayToBase64(single), Buffer.from(single).toString('base64'));
+});
+
 console.log(`\n${passed} đạt, ${failed} lỗi`);
 process.exit(failed === 0 ? 0 : 1);

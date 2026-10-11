@@ -141,3 +141,21 @@ export function peakLevel(data: ArrayBuffer, encoding: 'int16' | 'float32'): num
   }
   return Math.min(1, peak / 32768);
 }
+
+/** Convert raw Uint8Array bytes to base64 string without native dependencies */
+export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+
+    result += chars[(b0 >> 2) & 63];
+    result += chars[((b0 & 3) << 4) | ((b1 >> 4) & 15)];
+    result += i + 1 < len ? chars[((b1 & 15) << 2) | ((b2 >> 6) & 3)] : '=';
+    result += i + 2 < len ? chars[b2 & 63] : '=';
+  }
+  return result;
+}

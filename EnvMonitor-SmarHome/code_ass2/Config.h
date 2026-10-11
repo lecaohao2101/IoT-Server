@@ -81,6 +81,7 @@ constexpr int VOICE_GATE_LEVEL    = 12;  // thang 0..100 của readINMP441SoundL
 constexpr int VOICE_GATE_BLOCKS   = 2;   // số khung liên tiếp vượt ngưỡng mới mở câu
 constexpr unsigned long VOICE_SILENCE_MS      = 900;    // lặng bấy nhiêu thì chốt câu
 constexpr unsigned long VOICE_MAX_UTTER_MS    = 20000;  // chặn trên, server cũng tự chặn
+constexpr unsigned long ECHO_SUPPRESS_MS      = 2500;   // Dập tiếng dội (AEC): thời gian tạm ngắt mic sau khi trợ lý phát âm
 
 // ==================== CẤU HÌNH HIVEMQ CLOUD MQTT ====================
 #define MQTT_BROKER    "navyqueen-54cb285b.a01.euc1.aws.hivemq.cloud"

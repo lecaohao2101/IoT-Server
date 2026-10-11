@@ -77,6 +77,9 @@ export function useVoiceSession(settings: Settings | null) {
   const attemptRef = useRef(0);
   const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingRef = useRef(false);
+  const isCapturingClipRef = useRef(false);
+  const clipChunksRef = useRef<Uint8Array[]>([]);
+  const [capturingClip, setCapturingClip] = useState(false);
   const replyExtRef = useRef('mp3');
   // The server may answer in MP3 (one complete file per clause) or in raw
   // PCM16 (fixed-size frames that mean nothing until a header is added and
@@ -106,15 +109,22 @@ export function useVoiceSession(settings: Settings | null) {
   const { stream } = useAudioStream(streamOptions);
 
   onBufferRef.current = (buffer: AudioStreamBuffer) => {
+    setLevel(peakLevel(buffer.data, MIC_ENCODING));
+    const conditioned = new Uint8Array(
+      conditionBuffer(buffer.data, buffer.sampleRate, buffer.channels, MIC_ENCODING)
+    );
+
+    if (isCapturingClipRef.current) {
+      clipChunksRef.current.push(conditioned);
+      return;
+    }
+
     if (!recordingRef.current) return;
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
-    setLevel(peakLevel(buffer.data, MIC_ENCODING));
     try {
-      socket.send(
-        conditionBuffer(buffer.data, buffer.sampleRate, buffer.channels, MIC_ENCODING)
-      );
+      socket.send(conditioned.buffer);
     } catch (err) {
       console.warn('mic: send failed', err);
     }
@@ -388,6 +398,66 @@ export function useVoiceSession(settings: Settings | null) {
     }
   }, [send, stream]);
 
+  const startCaptureClip = useCallback(async () => {
+    if (recordingRef.current || isCapturingClipRef.current) return;
+    const permission = await requestRecordingPermissionsAsync();
+    if (!permission.granted) {
+      setError('Ứng dụng chưa được cấp quyền dùng micro.');
+      return;
+    }
+
+    speech.stop();
+    clipChunksRef.current = [];
+    isCapturingClipRef.current = true;
+    setCapturingClip(true);
+
+    try {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await stream.start();
+    } catch (err) {
+      isCapturingClipRef.current = false;
+      setCapturingClip(false);
+      setError(`Không mở được micro: ${String(err)}`);
+    }
+  }, [speech, stream]);
+
+  const stopCaptureClip = useCallback(async (): Promise<Uint8Array | null> => {
+    if (!isCapturingClipRef.current) return null;
+    isCapturingClipRef.current = false;
+    setCapturingClip(false);
+    setLevel(0);
+
+    try {
+      stream.stop();
+    } catch (err) {
+      console.warn('mic: stop failed', err);
+    }
+
+    try {
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+    } catch {
+      // Ignore
+    }
+
+    const chunks = clipChunksRef.current;
+    clipChunksRef.current = [];
+    if (!chunks.length) return null;
+    return concatBytes(chunks);
+  }, [stream]);
+
+  const cancelCaptureClip = useCallback(() => {
+    if (!isCapturingClipRef.current) return;
+    isCapturingClipRef.current = false;
+    setCapturingClip(false);
+    setLevel(0);
+    clipChunksRef.current = [];
+    try {
+      stream.stop();
+    } catch (err) {
+      console.warn('mic: stop failed', err);
+    }
+  }, [stream]);
+
   const sendText = useCallback(
     (text: string) => {
       const trimmed = text.trim();
@@ -434,6 +504,10 @@ export function useVoiceSession(settings: Settings | null) {
     speaking,
     level,
     error,
+    capturingClip,
+    startCaptureClip,
+    stopCaptureClip,
+    cancelCaptureClip,
     connect,
     disconnect,
     startTalking,

@@ -23,7 +23,7 @@ from typing import Any
 from app.ai.base import AudioEncoding, SpeechRecognizer, SttStream
 from app.api import ws_protocol as proto
 from app.config import Settings
-from app.core.audio import AudioFormat, SilenceEndpointer, resample, to_mono
+from app.core.audio import AudioFormat, SilenceEndpointer, denoise_pcm16, resample, to_mono
 from app.core.errors import AppError
 from app.core.eventbus import TOPIC_DEVICE_AVAILABILITY, TOPIC_DEVICE_STATE, EventBus
 from app.core.security import Principal
@@ -259,6 +259,7 @@ class VoiceSession(TurnSink):
             await self._cancel_active("barge_in")
 
         frame = self._normalise(payload)
+        frame = denoise_pcm16(frame)
         self._utterance_frames.append(frame)
         if self._stream is None:
             await self._reset_utterance()

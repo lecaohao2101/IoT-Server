@@ -12,14 +12,12 @@
       }
     },
     "preview": {
-      "//": "APK cài tay được: tải về, bật 'cài từ nguồn không xác định', xong.",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       }
     },
     "production": {
-      "//": "AAB cho Google Play. Play Store không nhận APK cho bản phát hành mới.",
       "android": {
         "buildType": "app-bundle"
       }

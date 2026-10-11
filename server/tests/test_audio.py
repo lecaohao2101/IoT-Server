@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import array
 import asyncio
+import math
 
 import pytest
 
+from app.core.audio import denoise_pcm16, rms
 from app.services.audio_hub import AudioBroadcastHub
 
 
@@ -47,3 +50,22 @@ def test_audio_endpoints(client):
     res = client.post("/api/audio/play", json={})
     assert res.status_code == 200
     assert res.json()["success"] is False
+
+
+def test_denoise_pcm16_suppression_and_filter():
+    # 1. Text payload should pass untouched
+    text = b"bat den phong khach"
+    assert denoise_pcm16(text) == text
+
+    # 2. Low-energy noise (RMS ~40) should be heavily attenuated below gate 120
+    noise = array.array("h", [40] * 320).tobytes()
+    denoised_noise = denoise_pcm16(noise, noise_gate_rms=120)
+    assert rms(denoised_noise) < rms(noise)
+
+    # 3. Speech-level signal (RMS ~1000) should pass through without suppression
+    sine = array.array(
+        "h",
+        [int(1500 * math.sin(2 * math.pi * 400 * i / 16000)) for i in range(320)],
+    ).tobytes()
+    denoised_sine = denoise_pcm16(sine, noise_gate_rms=120)
+    assert rms(denoised_sine) > 500

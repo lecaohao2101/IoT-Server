@@ -79,6 +79,8 @@ static int  gate_blocks = 0;
 static unsigned long talk_started_ms = 0;
 static unsigned long last_voice_ms = 0;
 static unsigned long last_ping_ms = 0;
+static unsigned long echo_suppress_until_ms = 0; // Dập tiếng dội: chặn mic kích hoạt lúc loa phát
+static int  ambient_noise_floor = 8;            // Ước lượng ồn nền thích ứng động
 
 bool voiceIsConnected() { return ws_ready; }
 bool voiceIsTalking()   { return talking; }
@@ -128,7 +130,8 @@ static void handleServerMessage(const String& msg) {
     Serial.printf("[VOICE-STT] ... %s\n", jsonStr(msg, "text").c_str());
   } else if (type == "stt.final") {
     Serial.printf("[VOICE-STT] Bạn đã nói: \"%s\"\n", jsonStr(msg, "text").c_str());
-  } else if (type == "assistant.final") {
+  } else if (type == "assistant.final" || type == "tts.start") {
+    echo_suppress_until_ms = millis() + ECHO_SUPPRESS_MS;
     Serial.printf("[VOICE-AI] Trợ lý trả lời: \"%s\"\n", jsonStr(msg, "text").c_str());
     digitalWrite(PIN_BUZZER, HIGH); delay(20); digitalWrite(PIN_BUZZER, LOW);
   } else if (type == "state.changed") {
@@ -218,8 +221,25 @@ static bool pumpFrame() {
   if (samples <= 0) return false;
   if (!ws_ready || WiFi.status() != WL_CONNECTED) return true;
 
-  bool loud = sound_level >= VOICE_GATE_LEVEL;
   unsigned long now = millis();
+  bool in_echo_suppression = (now < echo_suppress_until_ms);
+
+  // Thích ứng mức ồn nền động của môi trường khi phòng yên tĩnh
+  if (!talking && !in_echo_suppression) {
+    if (sound_level < ambient_noise_floor) {
+      ambient_noise_floor = sound_level;
+    } else {
+      static unsigned long last_adapt_ms = 0;
+      if (now - last_adapt_ms >= 300) {
+        last_adapt_ms = now;
+        ambient_noise_floor = (ambient_noise_floor * 95 + sound_level * 5) / 100;
+      }
+    }
+  }
+
+  // Cổng ngưỡng âm động: tự nâng ngưỡng khi phòng ồn hơn (tiếng quạt, điều hoà...)
+  int dynamic_gate = max((int)VOICE_GATE_LEVEL, ambient_noise_floor + 10);
+  bool loud = (!in_echo_suppression) && (sound_level >= dynamic_gate);
 
   if (!talking) {
     // Cổng âm thanh: chỉ truyền khi thật sự có người nói. Không có nó, mic đẩy

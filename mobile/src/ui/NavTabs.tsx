@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors, radius, spacing } from './theme';
 
-export type ActiveTab = 'voice' | 'devices';
+export type ActiveTab = 'voice' | 'devices' | 'speakers';
 
 type Props = {
   activeTab: ActiveTab;
@@ -17,7 +17,7 @@ export function NavTabs({ activeTab, onTabChange, onDeviceCount }: Props) {
         style={[styles.tab, activeTab === 'voice' && styles.tabActive]}
       >
         <Text style={[styles.tabText, activeTab === 'voice' && styles.tabTextActive]}>
-          🎙️ Trợ lý giọng nói
+          🎙️ Trợ lý
         </Text>
       </Pressable>
 
@@ -26,13 +26,22 @@ export function NavTabs({ activeTab, onTabChange, onDeviceCount }: Props) {
         style={[styles.tab, activeTab === 'devices' && styles.tabActive]}
       >
         <Text style={[styles.tabText, activeTab === 'devices' && styles.tabTextActive]}>
-          💡 Thiết bị & MQTT
+          💡 Thiết bị
         </Text>
         {onDeviceCount > 0 && (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{onDeviceCount}</Text>
           </View>
         )}
+      </Pressable>
+
+      <Pressable
+        onPress={() => onTabChange('speakers')}
+        style={[styles.tab, activeTab === 'speakers' && styles.tabActive]}
+      >
+        <Text style={[styles.tabText, activeTab === 'speakers' && styles.tabTextActive]}>
+          👥 Giọng nói
+        </Text>
       </Pressable>
     </View>
   );

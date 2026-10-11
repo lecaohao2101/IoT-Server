@@ -389,6 +389,7 @@ static unsigned long up_last_voice_ms = 0;
 static uint32_t      up_bytes = 0;
 static int16_t       up_peak = 0;
 static int           up_gate_frames = 0;
+static int           up_noise_floor = 8;
 
 // Một khối chunked: "<do dai he 16>\r\n<du lieu>\r\n".
 static bool sendChunk(const uint8_t* payload, size_t len) {
@@ -495,8 +496,21 @@ bool micPoll(const char* host, int port, MicUploadResult& out) {
   int n = captureFrame(0);        // không chặn: hết dữ liệu thì thôi
   if (n <= 0) return false;
 
-  bool loud = sound_level >= MIC_GATE_LEVEL;
   unsigned long now = millis();
+  if (!up_talking) {
+    if (sound_level < up_noise_floor) {
+      up_noise_floor = sound_level;
+    } else {
+      static unsigned long last_noise_calc = 0;
+      if (now - last_noise_calc >= 300) {
+        last_noise_calc = now;
+        up_noise_floor = (up_noise_floor * 95 + sound_level * 5) / 100;
+      }
+    }
+  }
+
+  int dyn_gate = max((int)MIC_GATE_LEVEL, up_noise_floor + 10);
+  bool loud = sound_level >= dyn_gate;
 
   if (!up_talking) {
     // Cổng âm thanh: phải đủ số khung liên tiếp có tiếng mới mở câu, để một

@@ -24,6 +24,7 @@ import { SettingsModal } from './src/ui/SettingsModal';
 import { StatusBar as ConnectionBar } from './src/ui/StatusBar';
 import { TalkButton } from './src/ui/TalkButton';
 import { Transcript } from './src/ui/Transcript';
+import { VoiceUsersView } from './src/ui/VoiceUsersView';
 import { colors, radius, spacing } from './src/ui/theme';
 import { useDeviceManager } from './src/useDeviceManager';
 import { useVoiceSession } from './src/useVoiceSession';
@@ -104,7 +105,7 @@ export default function App() {
               onPressOut={() => void session.stopTalking()}
             />
           </>
-        ) : (
+        ) : activeTab === 'devices' ? (
           <DeviceControlView
             devices={deviceManager.devices}
             counts={deviceManager.counts}
@@ -116,6 +117,16 @@ export default function App() {
             onSetCapability={deviceManager.setCapability}
             onTurnOffAllLights={deviceManager.turnOffAllLights}
             onDismissMessage={deviceManager.dismissMessage}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        ) : (
+          <VoiceUsersView
+            settings={settings}
+            capturingClip={session.capturingClip}
+            level={session.level}
+            startCaptureClip={session.startCaptureClip}
+            stopCaptureClip={session.stopCaptureClip}
+            cancelCaptureClip={session.cancelCaptureClip}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         )}

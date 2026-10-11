@@ -24,7 +24,11 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "RECORD_AUDIO",
-        "INTERNET"
+        "INTERNET",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
       ],
       "usesCleartextTraffic": true,
       "package": "com.lecaohao.smartapartment",
@@ -40,6 +44,12 @@
           "microphonePermission": "Cho phép dùng micro để ra lệnh bằng giọng nói."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "21cb053f-b504-41e9-9ad5-46b825179017"
+      }
+    },
+    "owner": "lecaohao2101"
   }
 }

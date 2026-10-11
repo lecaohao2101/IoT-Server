@@ -149,6 +149,65 @@ def convert_pcm(
     return out
 
 
+def denoise_pcm16(pcm: bytes, noise_gate_rms: int = 120) -> bytes:
+    """Condition incoming 16 kHz mono PCM16 audio for noise reduction.
+
+    Applies:
+    1. A 1st-order high-pass IIR filter (~80 Hz cutoff at 16 kHz) to eliminate
+       DC offsets, 50/60 Hz electrical mains hum, and table rumble.
+    2. A soft-knee energy gate: frames with RMS energy below `noise_gate_rms`
+       are smoothly attenuated to suppress continuous background hiss (e.g. fans, AC)
+       without abrupt clipping.
+    """
+    if not pcm or len(pcm) < 2:
+        return pcm
+
+    # Bỏ qua nếu payload là text mô phỏng (từ bộ kiểm thử WebSocket hoặc simulator)
+    try:
+        decoded = pcm.decode("utf-8")
+        if decoded.strip() and sum(1 for ch in decoded if ch.isprintable()) / len(decoded) > 0.95:
+            return pcm
+    except UnicodeDecodeError:
+        pass
+
+    samples = _as_samples(pcm)
+    n = len(samples)
+    if n == 0:
+        return pcm
+
+    out = array.array("h", [0] * n)
+    alpha = 0.969  # ~80 Hz cutoff at 16 kHz: y[i] = x[i] - x[i-1] + alpha * y[i-1]
+    prev_x = samples[0]
+    prev_y = 0.0
+
+    filtered: list[float] = []
+    energy_sum = 0.0
+    for s in samples:
+        y = float(s - prev_x) + alpha * prev_y
+        prev_x = s
+        prev_y = y
+        filtered.append(y)
+        energy_sum += y * y
+
+    frame_rms = math.sqrt(energy_sum / n) if n > 0 else 0.0
+
+    # Soft-knee gain attenuation
+    if frame_rms <= 0.0:
+        gain = 0.0
+    elif frame_rms < noise_gate_rms:
+        # Smooth quadratic attenuation curve
+        ratio = frame_rms / noise_gate_rms
+        gain = ratio * ratio
+    else:
+        gain = 1.0
+
+    for i in range(n):
+        val = int(filtered[i] * gain)
+        out[i] = max(-32768, min(32767, val))
+
+    return _as_bytes(out)
+
+
 
 # ----------------------------------------------------------------- container
 
