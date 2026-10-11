@@ -68,33 +68,6 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     capabilities: ['power', 'temperature', 'mode', 'fan_speed', 'vane_angle'],
     state: { power: 'off', temperature: 26, vane_angle: 0, online: true },
   },
-  {
-    id: 'living_room_curtain',
-    name: 'Rèm phòng khách',
-    type: 'curtain',
-    room: 'living_room',
-    roomName: 'Phòng khách',
-    capabilities: ['state', 'position'],
-    state: { state: 'closed', position: 0, online: true },
-  },
-  {
-    id: 'living_room_tv',
-    name: 'Tivi phòng khách',
-    type: 'tv',
-    room: 'living_room',
-    roomName: 'Phòng khách',
-    capabilities: ['power', 'volume'],
-    state: { power: 'off', volume: 25, online: true },
-  },
-  {
-    id: 'front_door_lock',
-    name: 'Khóa cửa chính',
-    type: 'lock',
-    room: 'living_room',
-    roomName: 'Phòng khách',
-    capabilities: ['locked'],
-    state: { locked: true, online: true },
-  },
 
   // --- Phòng bếp (kitchen) ---
   {
@@ -105,15 +78,6 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     roomName: 'Phòng bếp',
     capabilities: ['power', 'brightness'],
     state: { power: 'off', brightness: 90, online: true },
-  },
-  {
-    id: 'kitchen_outlet',
-    name: 'Ổ cắm bếp',
-    type: 'outlet',
-    room: 'kitchen',
-    roomName: 'Phòng bếp',
-    capabilities: ['power'],
-    state: { power: 'off', online: true },
   },
 
   // --- Phòng ngủ (bedroom) ---
@@ -153,14 +117,16 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     capabilities: ['power', 'temperature', 'mode', 'fan_speed', 'vane_angle'],
     state: { power: 'off', temperature: 26, vane_angle: 0, online: true },
   },
+
+  // --- Ban công (balcony) ---
   {
-    id: 'bedroom_curtain',
-    name: 'Rèm phòng ngủ',
-    type: 'curtain',
-    room: 'bedroom',
-    roomName: 'Phòng ngủ',
-    capabilities: ['state', 'position'],
-    state: { state: 'closed', position: 0, online: true },
+    id: 'balcony_light',
+    name: 'Đèn ban công',
+    type: 'light',
+    room: 'balcony',
+    roomName: 'Ban công',
+    capabilities: ['power', 'brightness'],
+    state: { power: 'off', brightness: 80, online: true },
   },
 
   // --- Phòng tắm (bathroom) ---
@@ -172,26 +138,6 @@ export const DEFAULT_DEVICES: DeviceItem[] = [
     roomName: 'Phòng tắm',
     capabilities: ['power', 'brightness'],
     state: { power: 'off', brightness: 100, online: true },
-  },
-  {
-    id: 'bathroom_water_heater',
-    name: 'Bình nóng lạnh',
-    type: 'water_heater',
-    room: 'bathroom',
-    roomName: 'Phòng tắm',
-    capabilities: ['power', 'temperature'],
-    state: { power: 'off', temperature: 45, online: true },
-  },
-
-  // --- Ban công (balcony) ---
-  {
-    id: 'balcony_light',
-    name: 'Đèn ban công',
-    type: 'light',
-    room: 'balcony',
-    roomName: 'Ban công',
-    capabilities: ['power', 'brightness'],
-    state: { power: 'off', brightness: 80, online: true },
   },
 ];
 

@@ -230,8 +230,8 @@ test('token KHÔNG được nhúng sẵn trong app', () => {
 import { DEFAULT_DEVICES, isDeviceOn, getDeviceStatusLabel, type DeviceItem } from '../src/devices.ts';
 import { DEFAULT_MQTT_SETTINGS } from '../src/settings.ts';
 
-test('DEFAULT_DEVICES chứa đúng 16 thiết bị căn hộ thông minh', () => {
-  assert.equal(DEFAULT_DEVICES.length, 16);
+test('DEFAULT_DEVICES chứa đúng 10 thiết bị phần cứng thực tế của căn hộ', () => {
+  assert.equal(DEFAULT_DEVICES.length, 10);
 });
 
 test('isDeviceOn nhận diện đúng trạng thái BẬT và TẮT của đèn', () => {

@@ -31,6 +31,7 @@ from app.services.audio_hub import AudioBroadcastHub
 from app.services.conversation import ConversationManager
 from app.services.device_state import DeviceStateManager
 from app.services.orchestrator import Orchestrator
+from app.services.speaker import SpeakerManager
 from app.storage.backend import KeyValueStore, create_store
 
 log = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class AppContainer:
     orchestrator: Orchestrator
     started_at: float
     audio_hub: AudioBroadcastHub
+    speaker_manager: SpeakerManager
 
     # ------------------------------------------------------------- lifecycle
     @classmethod
@@ -119,6 +121,12 @@ class AppContainer:
             sample_rate=settings.audio_sample_rate,
         )
 
+        speaker_manager = SpeakerManager(
+            profiles_path=settings.resolve(settings.voice_profiles_path),
+            enabled=settings.voice_verification_enabled,
+            threshold=settings.voice_verification_threshold,
+        )
+
         return cls(
             settings=settings,
             home=home,
@@ -136,6 +144,7 @@ class AppContainer:
             orchestrator=orchestrator,
             started_at=time.monotonic(),
             audio_hub=AudioBroadcastHub(),
+            speaker_manager=speaker_manager,
         )
 
     async def aclose(self) -> None:

@@ -17,6 +17,7 @@ from app.api import (
     routes_chat,
     routes_devices,
     routes_hardware,
+    routes_speakers,
     routes_system,
     ws_voice,
 )
@@ -145,6 +146,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(routes_chat.router)
     app.include_router(routes_hardware.router)
     app.include_router(routes_audio.router)
+    app.include_router(routes_speakers.router)
     app.include_router(ws_voice.router)
     return app
 

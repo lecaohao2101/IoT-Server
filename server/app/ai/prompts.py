@@ -153,9 +153,17 @@ def build_system_prompt(
     elif current_room:
         room_line = current_room
 
+    all_rooms_desc = ", ".join(f"{r.name} ({r.id})" for r in home.rooms)
+
     sections = [
         SYSTEM_HEADER,
-        f"BỐI CẢNH\n- Căn hộ: {home.name}\n- Thời gian: {format_now(now)}\n- Phòng hiện tại: {room_line}",
+        (
+            f"BỐI CẢNH\n"
+            f"- Căn hộ: {home.name}\n"
+            f"- Danh sách phòng có trong nhà: {all_rooms_desc}\n"
+            f"- Thời gian: {format_now(now)}\n"
+            f"- Phòng hiện tại: {room_line}"
+        ),
     ]
     if quiet_hours:
         sections.append(

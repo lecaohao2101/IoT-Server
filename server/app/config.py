@@ -107,6 +107,11 @@ class Settings(BaseSettings):
     silence_timeout_ms: int = 900
     tts_chunk_bytes: int = 3200  # 100 ms of 16 kHz mono PCM16
 
+    # ----------------------------------------------------------- voice biometrics
+    voice_verification_enabled: bool = False
+    voice_verification_threshold: float = 0.75
+    voice_profiles_path: Path = Path("config/speakers.json")
+
     #: Log what was recognised and what was synthesised, not just the byte counts.
     #: Transcripts are recorded speech, so set LOG_TRANSCRIPTS=false where that
     #: content should not land in the log stream.

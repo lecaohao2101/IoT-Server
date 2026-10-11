@@ -49,6 +49,7 @@ class VoiceSession(TurnSink):
         session_id: str | None = None,
         room: str | None = None,
         audio_hub: Any = None,
+        speaker_manager: Any = None,
     ) -> None:
         self._ws = websocket
         self._orchestrator = orchestrator
@@ -57,6 +58,8 @@ class VoiceSession(TurnSink):
         self._bus = bus
         self._principal = principal
         self._audio_hub = audio_hub
+        self._speaker_manager = speaker_manager
+        self._utterance_frames: list[bytes] = []
 
         self.session_id = session_id or new_id("sess")
         self.room = room
@@ -256,6 +259,7 @@ class VoiceSession(TurnSink):
             await self._cancel_active("barge_in")
 
         frame = self._normalise(payload)
+        self._utterance_frames.append(frame)
         if self._stream is None:
             await self._reset_utterance()
 
@@ -286,6 +290,7 @@ class VoiceSession(TurnSink):
     async def _reset_utterance(self) -> None:
         await self._end_recognition(discard=True)
         self._endpointer.reset()
+        self._utterance_frames.clear()
         self._utterance_bytes = 0
         self._utterance_started = time.monotonic()
         self._audio_ended = False
@@ -397,7 +402,59 @@ class VoiceSession(TurnSink):
 
         if final_text and not self._closed:
             await self._send(proto.stt_final(final_text, confidence))
+
+            if (
+                self._speaker_manager is not None
+                and self._speaker_manager.enabled
+                and self._speaker_manager.has_enrolled_speakers
+            ):
+                audio_payload = b"".join(self._utterance_frames)
+                verify_res = self._speaker_manager.verify(audio_payload)
+                if not verify_res.verified:
+                    log.warning(
+                        "voice command rejected -- unauthorized speaker",
+                        extra={
+                            "session_id": self.session_id,
+                            "reason": verify_res.reason,
+                            "score": verify_res.score,
+                            "threshold": verify_res.threshold,
+                            "text": truncate(final_text, 80),
+                        },
+                    )
+                    rejection_speech = (
+                        "Xin lỗi, mình không nhận diện được giọng nói của bạn "
+                        "trong danh sách người dùng được cấp quyền."
+                    )
+                    await self._reject_unauthorized_speaker(rejection_speech)
+                    return
+
             await self._start_turn(final_text)
+
+    async def _reject_unauthorized_speaker(self, speech: str) -> None:
+        await self._send(proto.assistant_delta(speech))
+        await self._send(
+            proto.assistant_final(
+                speech,
+                plan=None,
+                error="unauthorized_speaker",
+                latency_ms={"total": 0.0},
+            )
+        )
+        if self._speak:
+            try:
+                audio_res = await self._orchestrator._tts.synthesize(
+                    speech,
+                    encoding=self._turn_encoding,
+                    sample_rate=self._s.audio_sample_rate,
+                )
+                if audio_res and audio_res.audio:
+                    await self.audio_start(audio_res.encoding, audio_res.sample_rate)
+                    chunk_sz = self._s.tts_chunk_bytes
+                    for i in range(0, len(audio_res.audio), chunk_sz):
+                        await self.audio_chunk(audio_res.audio[i : i + chunk_sz])
+                    await self.audio_end()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("failed to synthesize speaker rejection speech: %s", exc)
 
     # ---------------------------------------------------------------- turn
     async def _start_turn(self, text: str) -> None:
