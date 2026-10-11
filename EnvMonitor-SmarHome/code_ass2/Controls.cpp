@@ -17,8 +17,10 @@ static bool state_bed_light     = false;
 static bool state_balcony_light = false;
 
 static bool state_lr_ac         = false;
+static int  temp_lr_ac          = 26;
 static int  current_lr_angle    = SERVO_ANGLE_CLOSE;
 static bool state_bed_ac        = false;
+static int  temp_bed_ac         = 26;
 static int  current_bed_angle   = SERVO_ANGLE_CLOSE;
 
 // Quản lý tự động ngắt xung PWM (detach) sau khi servo quay xong vị trí
@@ -71,9 +73,14 @@ void updateServos() {
 }
 
 void refreshLCDDevices(bool wifiOk) {
-  updateLCDLivingRoomDevices(state_lr_light, state_lr_ac, current_lr_angle, wifiOk);
-  updateLCDBedroomDevices(state_bed_light, state_bed_ac, current_bed_angle, (digitalRead(PIN_LED_STUDY) == HIGH));
+  updateLCDLivingRoomDevices(state_lr_light, state_lr_ac, temp_lr_ac, state_bed_ac, temp_bed_ac, wifiOk);
+  updateLCDBedroomDevices(state_bed_light, state_bed_ac, temp_bed_ac, (digitalRead(PIN_LED_STUDY) == HIGH));
 }
+
+int getLivingRoomACTemp()   { return temp_lr_ac; }
+int getBedroomACTemp()      { return temp_bed_ac; }
+bool getLivingRoomACState() { return state_lr_ac; }
+bool getBedroomACState()    { return state_bed_ac; }
 
 void initControls() {
   int outputs[] = {
@@ -140,7 +147,7 @@ void handleButtons() {
       digitalWrite(PIN_LED_LR_SOFA, state_lr_light ? HIGH : LOW);
 
       // Hiển thị thông báo tức thời và làm mới màn hình LCD
-      showLCDNotify(1, state_lr_light ? "[PK]  BAT DEN   " : "[PK]  TAT DEN   ", 2000);
+      showLCDNotify(1, state_lr_light ? "[LR]  ON DEN   " : "[LR]  OFF DEN   ", 2000);
       refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 
       String boolStr = state_lr_light ? "true" : "false";
@@ -155,7 +162,7 @@ void handleButtons() {
       digitalWrite(PIN_BUZZER, HIGH); 
       delay(30); 
       digitalWrite(PIN_BUZZER, LOW);
-      Serial.printf("[BTN-CLICK] Nút Phòng Khách -> Đèn: %s\n", state_lr_light ? "BAT" : "TAT");
+      Serial.printf("[BTN-CLICK] Nút Phòng Khách -> Đèn: %s\n", state_lr_light ? "ON" : "OFF");
     }
   }
   lastBtnState_lr = current_lr;
@@ -167,7 +174,7 @@ void handleButtons() {
       state_kitchen_light = !state_kitchen_light;
       digitalWrite(PIN_LED_KIT_MAIN, state_kitchen_light ? HIGH : LOW);
 
-      showLCDNotify(1, state_kitchen_light ? "[BEP] BAT DEN   " : "[BEP] TAT DEN   ", 2000);
+      showLCDNotify(1, state_kitchen_light ? "[BEP] ON DEN   " : "[BEP] OFF DEN   ", 2000);
       refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 
       String boolStr = state_kitchen_light ? "true" : "false";
@@ -179,7 +186,7 @@ void handleButtons() {
       mqttPublishState("kitchen", "kitchen_light", state_kitchen_light ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
       digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-      Serial.printf("[BTN-CLICK] Nút Nhà Bếp -> Đèn: %s\n", state_kitchen_light ? "BAT" : "TAT");
+      Serial.printf("[BTN-CLICK] Nút Nhà Bếp -> Đèn: %s\n", state_kitchen_light ? "ON" : "OFF");
     }
   }
   lastBtnState_kitchen = current_kitchen;
@@ -192,7 +199,7 @@ void handleButtons() {
       digitalWrite(PIN_LED_BED_MAIN, state_bed_light ? HIGH : LOW);
       digitalWrite(PIN_LED_BED_SIDE, state_bed_light ? HIGH : LOW);
 
-      showLCDNotify(2, state_bed_light ? "[PN]  BAT DEN   " : "[PN]  TAT DEN   ", 2000);
+      showLCDNotify(2, state_bed_light ? "[BR]  ON DEN   " : "[BR]  OFF DEN   ", 2000);
       refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 
       String boolStr = state_bed_light ? "true" : "false";
@@ -205,7 +212,7 @@ void handleButtons() {
       mqttPublishState("bedroom", "bedroom_side_light", state_bed_light ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
       digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-      Serial.printf("[BTN-CLICK] Nút Phòng Ngủ -> Đèn: %s\n", state_bed_light ? "BAT" : "TAT");
+      Serial.printf("[BTN-CLICK] Nút Phòng Ngủ -> Đèn: %s\n", state_bed_light ? "ON" : "OFF");
     }
   }
   lastBtnState_bed = current_bed;
@@ -229,7 +236,7 @@ void handleButtons() {
       mqttPublishState("balcony", "balcony_light", state_balcony_light ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
 
       digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-      Serial.printf("[BTN-CLICK] Nút Ban Công -> Đèn: %s\n", state_balcony_light ? "BAT" : "TAT");
+      Serial.printf("[BTN-CLICK] Nút Ban Công -> Đèn: %s\n", state_balcony_light ? "ON" : "OFF");
       
       // Mở ngay một câu nói trên luồng WebSocket đang mở sẵn.
       Serial.println("[Click] Mở micro gửi trợ lý AI (nói tự nhiên, server tự cắt câu)...");
@@ -239,19 +246,22 @@ void handleButtons() {
   lastBtnState_balcony = current_balcony;
 }
 
-void setDeviceActuator(const String& deviceId, bool power, int value) {
-  Serial.printf("[ACTUATOR] %s -> %s (val=%d)\n", deviceId.c_str(), power ? "ON" : "OFF", value);
+void setDeviceActuator(const String& deviceId, bool power, int value, int targetTemp) {
+  Serial.printf("[ACTUATOR] %s -> %s (val=%d, temp=%d)\n", deviceId.c_str(), power ? "ON" : "OFF", value, targetTemp);
   if (deviceId == "living_room_light") {
     digitalWrite(PIN_LED_LR_MAIN, power ? HIGH : LOW);
     state_lr_light = power;
+    showLCDNotify(1, power ? "[LR]  ON DEN   " : "[LR]  OFF DEN   ", 2000);
   } else if (deviceId == "living_room_sofa_light") {
     digitalWrite(PIN_LED_LR_SOFA, power ? HIGH : LOW);
   } else if (deviceId == "kitchen_light") {
     digitalWrite(PIN_LED_KIT_MAIN, power ? HIGH : LOW);
     state_kitchen_light = power;
+    showLCDNotify(1, power ? "[KIT] ON DEN   " : "[KIT] OFF DEN   ", 2000);
   } else if (deviceId == "bedroom_light") {
     digitalWrite(PIN_LED_BED_MAIN, power ? HIGH : LOW);
     state_bed_light = power;
+    showLCDNotify(2, power ? "[BR]  ON DEN   " : "[BR]  OFF DEN   ", 2000);
   } else if (deviceId == "bedroom_side_light") {
     digitalWrite(PIN_LED_BED_SIDE, power ? HIGH : LOW);
   } else if (deviceId == "study_light") {
@@ -259,16 +269,39 @@ void setDeviceActuator(const String& deviceId, bool power, int value) {
   } else if (deviceId == "balcony_light") {
     digitalWrite(PIN_LED_BALCONY, power ? HIGH : LOW);
     state_balcony_light = power;
+    showLCDNotify(1, power ? "[BAL] ON DEN   " : "[BAL] OFF DEN   ", 2000);
   } else if (deviceId == "bathroom_light") {
     digitalWrite(PIN_LED_WC, power ? HIGH : LOW);
   } else if (deviceId == "living_room_ac") {
+    if (targetTemp > 0) {
+      temp_lr_ac = targetTemp;
+      power = true;
+    }
     int angle = (value >= 0) ? value : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
     moveServoLR(angle);
     state_lr_ac = power || (angle > 0);
+    char notifyBuf[17];
+    if (state_lr_ac) {
+      snprintf(notifyBuf, sizeof(notifyBuf), "[LR-AC] %d*C", temp_lr_ac);
+    } else {
+      snprintf(notifyBuf, sizeof(notifyBuf), "[LR-AC] OFF");
+    }
+    showLCDNotify(1, notifyBuf, 2000);
   } else if (deviceId == "bedroom_ac") {
+    if (targetTemp > 0) {
+      temp_bed_ac = targetTemp;
+      power = true;
+    }
     int angle = (value >= 0) ? value : (power ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
     moveServoBed(angle);
     state_bed_ac = power || (angle > 0);
+    char notifyBuf[17];
+    if (state_bed_ac) {
+      snprintf(notifyBuf, sizeof(notifyBuf), "[BR-AC] %d*C", temp_bed_ac);
+    } else {
+      snprintf(notifyBuf, sizeof(notifyBuf), "[BR-AC] OFF");
+    }
+    showLCDNotify(0, notifyBuf, 2000);
   }
   refreshLCDDevices(WiFi.status() == WL_CONNECTED);
 }

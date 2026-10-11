@@ -112,11 +112,13 @@ static void applyStateChanged(const String& msg) {
 
   String power = jsonStr(msg, "power");
   int vane = jsonInt(msg, "vane_angle", -1);
-  if (power.isEmpty() && vane < 0) return;
+  int temp = jsonInt(msg, "temperature", -1);
+  if (temp < 0) temp = jsonInt(msg, "temp", -1);
+  if (power.isEmpty() && vane < 0 && temp < 0) return;
 
-  Serial.printf("[VOICE-STATE] %s -> %s (góc: %d)\n", deviceId.c_str(),
-                power.isEmpty() ? "-" : power.c_str(), vane);
-  setDeviceActuator(deviceId, power == "on", vane);
+  Serial.printf("[VOICE-STATE] %s -> %s (góc: %d, temp: %d)\n", deviceId.c_str(),
+                power.isEmpty() ? "-" : power.c_str(), vane, temp);
+  setDeviceActuator(deviceId, power == "on", vane, temp);
 }
 
 static void handleServerMessage(const String& msg) {
@@ -289,7 +291,7 @@ void voiceLoop() {
 #else
 
 void voiceBegin() {
-  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang TAT (ENABLE_VOICE_ASSISTANT = 0).");
+  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang OFF (ENABLE_VOICE_ASSISTANT = 0).");
 }
 
 void voiceLoop() {
@@ -298,7 +300,7 @@ void voiceLoop() {
 }
 
 void voiceRequestTalk() {
-  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang TAT. Bo qua yeu cau noi.");
+  Serial.println("[VOICE] Tinh nang nhan dien giong noi dang OFF. Bo qua yeu cau noi.");
 }
 
 bool voiceIsConnected() { return false; }

@@ -118,7 +118,7 @@ static void speakerSelfTest() {
     Serial.println("[LOA] ==> Du lieu da ra khoi chip. Neu KHONG nghe thay gi:");
     Serial.printf("[LOA]     1. Doi chieu lai day: BCLK=D%d, LRC=D%d, DIN=D%d.\n",
                   AUDIO_PIN_BCLK, AUDIO_PIN_WS, AUDIO_PIN_SPK_DIN);
-    Serial.println("[LOA]     2. MAX98357A: chan SD la BAT/TAT, noi xuong GND la cam tieng.");
+    Serial.println("[LOA]     2. MAX98357A: chan SD la ON/OFF, noi xuong GND la cam tieng.");
     Serial.println("[LOA]     3. VIN phai la 5V, va GND cua loa phai chung GND voi ESP32.");
     Serial.println("[LOA]     4. Go 't' de phat lai, '+' de tang am luong phan mem.");
   }

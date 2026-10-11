@@ -48,6 +48,23 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
     val = pLower.substring(angleIdx + 13).toInt();
   }
 
+  int tempVal = -1;
+  int tempIdx = pLower.indexOf("\"temperature\":");
+  if (tempIdx != -1) {
+    tempVal = pLower.substring(tempIdx + 14).toInt();
+  } else {
+    tempIdx = pLower.indexOf("\"temp\":");
+    if (tempIdx != -1) {
+      tempVal = pLower.substring(tempIdx + 7).toInt();
+    }
+  }
+  if (tempVal <= 0 && t.indexOf("_ac") != -1) {
+    int parsedNum = pLower.toInt();
+    if (parsedNum >= 16 && parsedNum <= 35) {
+      tempVal = parsedNum;
+    }
+  }
+
   const char* pState = power ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}";
 
   // Khớp topic thiết bị, kích hoạt phần cứng và phản hồi trạng thái ngược lên MQTT
@@ -92,19 +109,21 @@ static void mqttCallback(char* topic, byte* payload, unsigned int length) {
       mqttPublishState("bathroom", "bathroom_light", pState);
     }
   } else if (t.indexOf("living_room_ac") != -1) {
-    if (hasPowerCmd || val >= 0) {
-      bool effectivePower = powerOff ? false : (powerOn || (val > 0));
-      setDeviceActuator("living_room_ac", effectivePower, val);
+    if (hasPowerCmd || tempVal > 0 || val >= 0) {
+      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || (val > 0) || getLivingRoomACState());
+      setDeviceActuator("living_room_ac", effectivePower, val, tempVal);
       int angle = (val >= 0) ? val : (effectivePower ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"vane_angle\":" + String(angle) + "}";
+      int curTemp = (tempVal > 0) ? tempVal : getLivingRoomACTemp();
+      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(curTemp) + ",\"vane_angle\":" + String(angle) + "}";
       mqttPublishState("living_room", "living_room_ac", acJson.c_str());
     }
   } else if (t.indexOf("bedroom_ac") != -1) {
-    if (hasPowerCmd || val >= 0) {
-      bool effectivePower = powerOff ? false : (powerOn || (val > 0));
-      setDeviceActuator("bedroom_ac", effectivePower, val);
+    if (hasPowerCmd || tempVal > 0 || val >= 0) {
+      bool effectivePower = powerOff ? false : (powerOn || (tempVal > 0) || (val > 0) || getBedroomACState());
+      setDeviceActuator("bedroom_ac", effectivePower, val, tempVal);
       int angle = (val >= 0) ? val : (effectivePower ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
-      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"vane_angle\":" + String(angle) + "}";
+      int curTemp = (tempVal > 0) ? tempVal : getBedroomACTemp();
+      String acJson = "{\"power\":\"" + String(effectivePower ? "on" : "off") + "\",\"temperature\":" + String(curTemp) + ",\"vane_angle\":" + String(angle) + "}";
       mqttPublishState("bedroom", "bedroom_ac", acJson.c_str());
     }
   }

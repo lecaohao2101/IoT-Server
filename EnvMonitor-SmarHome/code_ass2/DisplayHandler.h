@@ -9,8 +9,13 @@ extern LiquidCrystal_I2C lcd_bed;
 void initLCDs();
 
 // Cập nhật trạng thái thiết bị thời gian thực (Dòng 0)
+// Hỗ trợ hiển thị LR:OFF/ON và BR:24*/OFF theo thời gian thực tùy chỉnh
+void updateLCDLivingRoomDevices(bool lrLightOn, bool lrAcOn, int lrTemp, bool brAcOn, int brTemp, bool wifiOk);
+void updateLCDBedroomDevices(bool lightOn, bool acOn, int acTemp, bool extraLight = false);
+
+// Hàm tương thích với chữ ký cũ
 void updateLCDLivingRoomDevices(bool lightOn, bool acOn, int acAngle, bool wifiOk);
-void updateLCDBedroomDevices(bool lightOn, bool acOn, int acAngle, bool extraLight = false);
+void updateLCDBedroomDevices(bool lightOn, bool acOn, int acAngle, bool extraLight, bool legacyTag);
 
 // Cập nhật cảm biến (Dòng 1)
 void updateLCDLivingRoomSensors(float temp, float hum, bool isDhtValid);

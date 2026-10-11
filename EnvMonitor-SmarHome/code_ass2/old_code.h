@@ -125,12 +125,12 @@ void handleButtons() {
     digitalWrite(PIN_LED_LR_MAIN, state_lr ? HIGH : LOW);
     digitalWrite(PIN_LED_LR_SOFA, state_lr ? HIGH : LOW);
     
-    // Xoay Servo Phòng khách (30 độ khi BAT, 0 độ khi TAT)
+    // Xoay Servo Phòng khách (30 độ khi ON, 0 độ khi OFF)
     servo_lr.write(state_lr ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     Serial.printf("[Click] Điều hòa Phòng Khách: %s | Servo: %d deg\n", 
-                  state_lr ? "BAT" : "TAT", state_lr ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
+                  state_lr ? "ON" : "OFF", state_lr ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
     delay(50);
   }
   lastBtnState_lr = current_lr;
@@ -141,7 +141,7 @@ void handleButtons() {
     digitalWrite(PIN_LED_KIT_MAIN, state_kitchen ? HIGH : LOW);
     
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-    Serial.printf("[Click] Đèn Nhà Bếp: %s\n", state_kitchen ? "BAT" : "TAT");
+    Serial.printf("[Click] Đèn Nhà Bếp: %s\n", state_kitchen ? "ON" : "OFF");
     delay(50);
   }
   lastBtnState_kitchen = current_kitchen;
@@ -152,12 +152,12 @@ void handleButtons() {
     digitalWrite(PIN_LED_BED_MAIN, state_bed ? HIGH : LOW);
     digitalWrite(PIN_LED_BED_SIDE, state_bed ? HIGH : LOW);
     
-    // Xoay Servo Phòng ngủ (30 độ khi BAT, 0 độ khi TAT)
+    // Xoay Servo Phòng ngủ (30 độ khi ON, 0 độ khi OFF)
     servo_bed.write(state_bed ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
 
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
     Serial.printf("[Click] Điều hòa Phòng Ngủ: %s | Servo: %d deg\n", 
-                  state_bed ? "BAT" : "TAT", state_bed ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
+                  state_bed ? "ON" : "OFF", state_bed ? SERVO_ANGLE_OPEN : SERVO_ANGLE_CLOSE);
     delay(50);
   }
   lastBtnState_bed = current_bed;
@@ -168,7 +168,7 @@ void handleButtons() {
     digitalWrite(PIN_LED_BALCONY, state_balcony ? HIGH : LOW);
     
     digitalWrite(PIN_BUZZER, HIGH); delay(30); digitalWrite(PIN_BUZZER, LOW);
-    Serial.printf("[Click] Đèn Ban Công: %s\n", state_balcony ? "BAT" : "TAT");
+    Serial.printf("[Click] Đèn Ban Công: %s\n", state_balcony ? "ON" : "OFF");
     delay(50);
   }
   lastBtnState_balcony = current_balcony;
