@@ -24,22 +24,25 @@
 // Để rỗng ("") thì chấp nhận thiết bị A2DP đầu tiên quét được -- chỉ nên dùng khi
 // nghi ngờ chính cái tên bị sai, vì lúc đó board sẽ thử ghép cả tai nghe, TV
 // hàng xóm, và những thứ đó không phải loa A2DP nên sẽ thất bại lặp vô tận.
-#define TARGET_SPEAKER_NAME "G-10"
+#define TARGET_SPEAKER_NAME "HAVIT TW967"
 
 #define SAMPLE_RATE 44100
 #define TONE_HZ     440
 
 BluetoothA2DPSource a2dp_source;
 
-static bool  connected = false;
+static volatile bool connected = false;
 static float m_time = 0.0f;
 static unsigned long last_report = 0;
 static int   scan_hits = 0;
 static int   connect_attempts = 0;
+volatile uint32_t cb_calls = 0;      // so lan Bluedroid goi xin du lieu
+static uint32_t   prev_cb = 0;
 
 // Phát một nốt 440 Hz liên tục. Nghe thấy tiếng này tức là toàn bộ chặng
 // board -> Bluetooth -> loa đã thông.
 int32_t get_sound_data(uint8_t* data, int32_t len) {
+  cb_calls++;
   if (!connected) {
     memset(data, 0, len);
     return len;
@@ -145,6 +148,12 @@ void loop() {
   Serial.printf("[TRANG THAI] %s | Lan quet thay loa: %d | Lan thu ghep: %d | Heap: %u byte\n",
                 connected ? "DA NOI - dang phat not 440 Hz" : "chua noi",
                 scan_hits, connect_attempts, (unsigned)ESP.getFreeHeap());
+
+  // Dem so lan Bluedroid xin du lieu. Day la con so quyet dinh: neu o day no
+  // chay vai tram moi 5 giay ma trong sketch day du van bang 0, thi duong A2DP
+  // hoan toan tot va thu pham la viec board bi qua tai -- khong phai loi logic.
+  Serial.printf("[TRANG THAI] CB (so lan xin du lieu): %u/5s\n", (unsigned)cb_calls - prev_cb);
+  prev_cb = cb_calls;
 
   if (!connected && connect_attempts >= 3) {
     Serial.println("[KET LUAN] Da thay loa va thu ghep nhieu lan nhung khong xong bat tay.");

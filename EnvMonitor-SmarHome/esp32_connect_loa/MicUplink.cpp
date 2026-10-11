@@ -368,3 +368,174 @@ MicUploadResult micRecordAndUpload(const char* host, int port, uint32_t duration
   }
   return res;
 }
+
+// ==================== LẮNG NGHE LIÊN TỤC ====================
+
+bool micListenBegin() {
+  if (!micInstall()) {
+    Serial.println("[MIC] Khong cai duoc I2S cho che do lang nghe.");
+    return false;
+  }
+  Serial.printf("[MIC] Lang nghe lien tuc | nguong mo cau: %d/100 | im %lu ms thi chot\n",
+                MIC_GATE_LEVEL, MIC_SILENCE_MS);
+  return true;
+}
+
+// Trạng thái của một câu nói đang được thu và gửi dở.
+static WiFiClient  up_client;
+static bool          up_talking = false;
+static unsigned long up_started_ms = 0;
+static unsigned long up_last_voice_ms = 0;
+static uint32_t      up_bytes = 0;
+static int16_t       up_peak = 0;
+static int           up_gate_frames = 0;
+
+// Một khối chunked: "<do dai he 16>\r\n<du lieu>\r\n".
+static bool sendChunk(const uint8_t* payload, size_t len) {
+  char head[16];
+  int n = snprintf(head, sizeof(head), "%X\r\n", (unsigned)len);
+  if (up_client.write((const uint8_t*)head, n) <= 0) return false;
+  if (up_client.write(payload, len) <= 0) return false;
+  return up_client.write((const uint8_t*)"\r\n", 2) > 0;
+}
+
+static bool openUtterance(const char* host, int port) {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  if (!up_client.connect(host, port, 8000)) {
+    Serial.printf("[MIC-UP] Khong mo duoc socket toi %s:%d (heap %u byte).\n",
+                  host, port, (unsigned)ESP.getFreeHeap());
+    return false;
+  }
+
+  // HTTP/1.1 + chunked: không phải khai tổng độ dài trước. Đây chính là thứ cho
+  // phép nói dài ngắn tuỳ ý thay vì cố định 3 giây như bản dùng Content-Length.
+  String head = String("POST /upload-audio HTTP/1.1\r\n") +
+                "Host: " + String(host) + "\r\n" +
+                "User-Agent: ESP32-Mic\r\n" +
+                "Content-Type: application/octet-stream\r\n" +
+                "Transfer-Encoding: chunked\r\n" +
+                "Connection: close\r\n\r\n";
+  up_client.print(head);
+
+  up_talking = true;
+  up_started_ms = millis();
+  up_last_voice_ms = up_started_ms;
+  up_bytes = 0;
+  up_peak = 0;
+  Serial.println("\n[MIC-UP] >>> Nghe thay tieng, dang thu va gui... (cu noi tu nhien)");
+  return true;
+}
+
+static void closeUtterance(MicUploadResult& out) {
+  up_client.print("0\r\n\r\n");          // khối rỗng = hết thân request
+  up_client.flush();
+
+  out.bytes_sent = up_bytes;
+  out.local_peak = up_peak;
+  out.elapsed_ms = millis() - up_started_ms;
+
+  Serial.printf("[MIC-UP] <<< Chot cau sau %u ms, da gui %u byte | bien do lon nhat: %d\n",
+                (unsigned)out.elapsed_ms, (unsigned)up_bytes, up_peak);
+  if (up_peak < 100) {
+    Serial.println("[MIC-UP] ==> CANH BAO: doan vua gui gan nhu im lang.");
+  }
+
+  String body;
+  bool in_body = false;
+  unsigned long deadline = millis() + 25000;
+  while (millis() < deadline) {
+    if (!up_client.available()) {
+      if (!up_client.connected()) break;
+      delay(5);
+      continue;
+    }
+    String line = up_client.readStringUntil('\n');
+    if (!in_body) {
+      if (out.http_status == 0 && line.startsWith("HTTP/")) {
+        int sp = line.indexOf(' ');
+        if (sp > 0) out.http_status = line.substring(sp + 1, sp + 4).toInt();
+      }
+      String t = line; t.trim();
+      if (t.length() == 0) in_body = true;
+    } else {
+      body += line;
+    }
+  }
+  up_client.stop();
+  up_talking = false;
+
+  if (body.isEmpty()) {
+    out.error = "no_response";
+    Serial.printf("[MIC-UP] Khong nhan duoc phan hoi (HTTP %d).\n", out.http_status);
+    return;
+  }
+
+  out.transcript = jsonField(body, "transcript");
+  out.reply      = jsonField(body, "response");
+  out.error      = jsonField(body, "error");
+  out.ok         = (body.indexOf("\"success\":true") >= 0);
+
+  if (out.transcript.length() > 0) {
+    Serial.printf("[MIC-UP] ==> SERVER NGHE DUOC: \"%s\"\n", out.transcript.c_str());
+  } else {
+    Serial.println("[MIC-UP] ==> Server khong nhan dang duoc cau nao.");
+  }
+  if (out.reply.length() > 0) {
+    Serial.printf("[MIC-UP] ==> TRO LY TRA LOI: \"%s\"\n", out.reply.c_str());
+  }
+  if (out.error.length() > 0) {
+    Serial.printf("[MIC-UP] ==> Server bao loi: %s\n", out.error.c_str());
+  }
+}
+
+bool micPoll(const char* host, int port, MicUploadResult& out) {
+  if (!driver_ready) return false;
+
+  int n = captureFrame(0);        // không chặn: hết dữ liệu thì thôi
+  if (n <= 0) return false;
+
+  bool loud = sound_level >= MIC_GATE_LEVEL;
+  unsigned long now = millis();
+
+  if (!up_talking) {
+    // Cổng âm thanh: phải đủ số khung liên tiếp có tiếng mới mở câu, để một
+    // tiếng cạch bàn không kích hoạt cả một lượt gọi server.
+    up_gate_frames = loud ? up_gate_frames + 1 : 0;
+    if (up_gate_frames < MIC_GATE_FRAMES) return false;
+    up_gate_frames = 0;
+
+    out = MicUploadResult{false, 0, 0, 0, 0, String(), String(), String()};
+    if (!openUtterance(host, port)) return false;
+
+    // Đọc lại đồng hồ SAU khi mở socket.
+    //
+    // `now` ở trên được lấy trước openUtterance(), mà hàm đó phải bắt tay TCP --
+    // mất vài trăm mili-giây. Thành ra up_started_ms lớn hơn `now`, và phép trừ
+    // `now - up_started_ms` trên kiểu unsigned không cho ra số âm mà vòng về một
+    // số khổng lồ. Thế là "đã nói quá 15 giây" đúng ở mili-giây thứ ba.
+    now = millis();
+  }
+
+  for (int i = 0; i < n; i++) {
+    int16_t a = abs(pcm_frame[i]);
+    if (a > up_peak) up_peak = a;
+  }
+  if (!sendChunk((const uint8_t*)pcm_frame, (size_t)n * sizeof(int16_t))) {
+    Serial.println("[MIC-UP] Mat ket noi giua chung, bo cau nay.");
+    up_client.stop();
+    up_talking = false;
+    return false;
+  }
+  up_bytes += (uint32_t)n * sizeof(int16_t);
+  if (loud) up_last_voice_ms = now;
+
+  bool silent_enough = (now - up_last_voice_ms) >= MIC_SILENCE_MS;
+  bool too_long      = (now - up_started_ms) >= MIC_MAX_UTTER_MS;
+  if (silent_enough || too_long) {
+    if (too_long) Serial.println("[MIC-UP] Cham tran thoi luong, chot cau.");
+    closeUtterance(out);
+    return true;
+  }
+  return false;
+}

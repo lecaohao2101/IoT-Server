@@ -48,6 +48,35 @@ const int LOCAL_PORT = 8000;
 // "[BT SCAN] Bat duoc: ... | MAC: ..." roi dien vao day.
 //
 // Dat USE_FIXED_SPEAKER_MAC = false de quay ve quet tu dong nhu cu.
+// ==================== TAM THOI TAT LOA BLUETOOTH ====================
+// Dat = false de bo han A2DP: khong ghep loa, khong mo luong audio.
+//
+// Duong DIEU KHIEN THIET BI khong di qua loa. Noi vao mic -> POST len
+// /upload-audio -> server nhan dang -> tra lenh xuong MQTT -> board ESP32-S3
+// bat den. Loa chi de NGHE cau tra loi, khong lien quan toi viec bat tat.
+//
+// Tat Bluetooth tra lai khoang 100 KB RAM va giai phong song 2.4 GHz -- hai
+// thu ma nut Test Mic dang thieu: no can ~4 KB dem DMA cong mot socket, trong
+// khi A2DP chay thi chi con hon 6 KB.
+#define ENABLE_BLUETOOTH false
+
+// ==================== CHE DO CHAN DOAN BLUETOOTH ====================
+// Dat = true de tra loi dut diem mot cau hoi duy nhat: duong A2DP co chay khong?
+//
+// Khi bat, board BO QUA Wi-Fi, mDNS, web server va luong audio TCP -- chi con
+// Bluetooth, va phat mot not 440 Hz lien tuc. Heap con gan nhu nguyen ven, song
+// 2.4 GHz chi mot minh Bluetooth dung.
+//
+// Phai cat bot nhu vay moi phan biet duoc hai nguyen nhan tu truoc toi gio nhin
+// giong het nhau: "tang A2DP hong" va "board qua tai nen A2DP khong chay noi".
+// Test trong cau hinh day du thi khong tach duoc hai thu do.
+//
+//   Nghe thay not 440 Hz, CB vai tram  -> A2DP tot, thu pham la qua tai
+//   Khong co tieng, CB = 0             -> loi nam o chinh tang A2DP
+//
+// Xong nho dat lai = false.
+#define DIAG_BT_ONLY false
+
 #define USE_FIXED_SPEAKER_MAC true
 // HAVIT TW967 -- con loa thuc su ghep noi duoc.
 //
@@ -534,9 +563,16 @@ void setup() {
   // đúng khoản dự phòng dùng để mở luồng audio.
   mic_ready = micBegin();
 
+  if (DIAG_BT_ONLY) {
+    Serial.println("\n*** CHE DO CHAN DOAN: chi chay Bluetooth, phat not 440 Hz. ***");
+    Serial.println("*** Bo qua Wi-Fi, mDNS, web server va luong audio. ***\n");
+    is_playing_test_sound = true;
+  }
+
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
 
+  if (!DIAG_BT_ONLY) {
   Serial.println("[WIFI] Dang kiem tra Wi-Fi...");
 
   // Giong board mic: uu tien mang cau hinh san, portal chi la duong lui.
@@ -574,6 +610,7 @@ void setup() {
   server.on("/reset_wifi", handleResetWifi);
   server.begin();
   Serial.println("[WEB] Web Server quản trị đã sẵn sàng.");
+  }   // het khoi !DIAG_BT_ONLY
 
   // Cấp bộ đệm và mở luồng audio NGAY BÂY GIỜ, trước khi bật Bluetooth.
   //
@@ -584,9 +621,20 @@ void setup() {
   //
   // Lúc này sóng hoàn toàn rảnh và RAM còn nguyên vẹn, nên bắt tay xong trong
   // chưa tới một giây. Socket mở rồi thì giữ luôn, không phải mở lại.
+  if (!ENABLE_BLUETOOTH) {
+    Serial.println("[A2DP] Bluetooth DANG TAT (ENABLE_BLUETOOTH = false).");
+    Serial.println("[A2DP] Khong ghep loa, khong mo luong audio -- de danh toan bo RAM cho mic.");
+    Serial.printf("[A2DP] Heap con lai: %u byte\n", (unsigned)ESP.getFreeHeap());
+    micListenBegin();
+    Serial.println("[SYSTEM] San sang. CU NOI THANG VAO MIC, khong can bam nut gi.");
+    return;        // ket thuc setup() o day
+  }
+
   allocAudioBuffer();
-  Serial.println("[STREAM] Mo luong audio truoc khi bat Bluetooth (song con ranh)...");
-  connectAudioStream();
+  if (!DIAG_BT_ONLY) {
+    Serial.println("[STREAM] Mo luong audio truoc khi bat Bluetooth (song con ranh)...");
+    connectAudioStream();
+  }
 
   // Cấu hình Bluetooth A2DP Source tới Loa ngoài
   a2dp_source.set_ssid_callback(ssid_callback);
@@ -626,7 +674,26 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();
+  if (!DIAG_BT_ONLY) server.handleClient();
+
+  // Khong co Bluetooth thi khong co gi de bom ra loa, va cung khong mo luong
+  // audio. Chi con web server phuc vu nut Test Mic.
+  if (!ENABLE_BLUETOOTH) {
+    // Lắng nghe liên tục: không cần bấm nút, không cố định thời lượng.
+    MicUploadResult r;
+    if (micPoll(USE_CLOUD ? CLOUD_HOST : LOCAL_HOST,
+                USE_CLOUD ? CLOUD_PORT : LOCAL_PORT, r)) {
+      last_mic_result = r;
+    }
+
+    unsigned long t = millis();
+    if (t - lastStatusLog >= 5000) {
+      lastStatusLog = t;
+      Serial.printf("[TRANG THAI] BT:tat | Mic:%d/100 | Heap:%u byte | Dang lang nghe, cu noi\n",
+                    micLevel(), (unsigned)ESP.getFreeHeap());
+    }
+    return;
+  }
 
   // Tự động kết nối và duy trì luồng âm thanh từ Server
   Client& client = getAudioClient();
@@ -638,7 +705,7 @@ void loop() {
   // Không còn đóng socket theo trạng thái loa như bản trước. Mở lại một socket
   // trong lúc A2DP đang phát là việc rất khó -- đó chính là chuỗi "het gio bat
   // tay TCP" trong log. Giữ được thì giữ.
-  if (WiFi.status() == WL_CONNECTED && !client.connected()) {
+  if (!DIAG_BT_ONLY && WiFi.status() == WL_CONNECTED && !client.connected()) {
     is_stream_connected = false;
     if (now - lastStreamReconnect > 5000) {
       lastStreamReconnect = now;
@@ -689,7 +756,7 @@ void loop() {
     prev_underruns   = stat_underruns;
     prev_cb_calls    = stat_cb_calls;
 
-    Serial.printf("[TRANG THAI] BT:%s | Stream:%s | Server->%u B/5s | Loa<-%u B/5s | Buffer:%d/%d | Hut:%u | Mic:%d | Heap:%u\n",
+    Serial.printf("[TRANG THAI] BT:%s | Stream:%s | Server->%u B/5s | Loa<-%u B/5s | Buffer:%d/%d | Hut:%u | CB:%u/5s | Mic:%d | Heap:%u\n",
                   is_bt_connected ? "OK" : "chua ghep",
                   is_stream_connected ? "OK" : "chua noi",
                   (unsigned)d_server, (unsigned)d_speaker,

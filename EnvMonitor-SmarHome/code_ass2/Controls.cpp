@@ -227,3 +227,26 @@ void syncAllFromStates(int lr_main, int lr_sofa, int kit_main, int bed_main, int
     servo_bed.write(bed_angle);
   }
 }
+
+void publishAllDeviceStates() {
+  bool lr_main  = (digitalRead(PIN_LED_LR_MAIN) == HIGH);
+  bool lr_sofa  = (digitalRead(PIN_LED_LR_SOFA) == HIGH);
+  bool kit      = (digitalRead(PIN_LED_KIT_MAIN) == HIGH);
+  bool bed      = (digitalRead(PIN_LED_BED_MAIN) == HIGH);
+  bool bed_side = (digitalRead(PIN_LED_BED_SIDE) == HIGH);
+  bool study    = (digitalRead(PIN_LED_STUDY) == HIGH);
+  bool bal      = (digitalRead(PIN_LED_BALCONY) == HIGH);
+  bool wc       = (digitalRead(PIN_LED_WC) == HIGH);
+
+  mqttPublishState("living_room", "living_room_light", lr_main ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("living_room", "living_room_sofa_light", lr_sofa ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("kitchen", "kitchen_light", kit ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("bedroom", "bedroom_light", bed ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("bedroom", "bedroom_side_light", bed_side ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("bedroom", "study_light", study ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("balcony", "balcony_light", bal ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("bathroom", "bathroom_light", wc ? "{\"power\":\"on\"}" : "{\"power\":\"off\"}");
+  mqttPublishState("living_room", "living_room_ac", state_lr ? "{\"power\":\"on\",\"vane_angle\":30}" : "{\"power\":\"off\",\"vane_angle\":0}");
+  mqttPublishState("bedroom", "bedroom_ac", state_bed ? "{\"power\":\"on\",\"vane_angle\":30}" : "{\"power\":\"off\",\"vane_angle\":0}");
+  Serial.println("[MQTT-SYNC] Đã đồng bộ trạng thái thực tế toàn bộ thiết bị lên MQTT Broker (Retained)");
+}
